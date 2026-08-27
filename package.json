@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build",
-    "start": "vite preview",
-    "preview": "vite preview",
-    "generate:vapid": "tsx scripts/generate-vapid.ts"
-  },
+  "dev": "tsx server.ts",
+  "build": "node ./node_modules/vite/bin/vite.js build",
+  "start": "vite preview",
+  "preview": "vite preview",
+  "generate:vapid": "tsx scripts/generate-vapid.ts"
+}
   "dependencies": {
     "@google/genai": "^1.30.0",
     "esbuild": "^0.28.2",
