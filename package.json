@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
   "dev": "tsx server.ts",
-  "build": "node ./node_modules/vite/bin/vite.js build",
+  "build": "npx vite build",
   "start": "vite preview",
   "preview": "vite preview",
   "generate:vapid": "tsx scripts/generate-vapid.ts"
