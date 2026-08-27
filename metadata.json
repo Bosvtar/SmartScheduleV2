@@ -1,0 +1,6 @@
+{
+  "name": "SmartSchedule AI",
+  "description": "Ứng dụng quản lý thời khóa biểu thông minh sử dụng Gemini để trích xuất lịch học từ ảnh/PDF.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
