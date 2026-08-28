@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { redis, deviceKey, sendPush, type StoredDevice } from "./_shared";
+import { redis, deviceKey, sendPush, type StoredDevice } from "./_shared.ts";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
