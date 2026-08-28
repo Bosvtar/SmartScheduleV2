@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = getVietnamNow();
   let checked=0, sent=0, errors=0;
   try {
-    const ids = await redis.smembers<string>(deviceSetKey);
+    const ids = await redis.smembers<string>[](deviceSetKey);
     for (const deviceId of ids || []) {
       const device = await redis.get<StoredDevice>(deviceKey(deviceId));
       if (!device?.subscription) { await redis.srem(deviceSetKey, deviceId); continue; }
