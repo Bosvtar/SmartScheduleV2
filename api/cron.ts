@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { redis, deviceKey, deviceSetKey, getVietnamNow, sendPush, type StoredDevice } from "./shared.ts";
+import { redis, deviceKey, deviceSetKey, getVietnamNow, sendPush, type StoredDevice } from "./_shared.ts";
 
 function authorized(req: VercelRequest) {
   const secret = process.env.CRON_SECRET;
