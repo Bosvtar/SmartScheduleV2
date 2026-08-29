@@ -95,8 +95,13 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     if (status === 'granted') {
       setFormData(prev => ({ ...prev, enabled: true }));
       setPushMessage({ text: 'Đã cấp quyền thông báo thành công!', type: 'success' });
+    } else if (status === 'denied') {
+      setPushMessage({
+        text: 'Trình duyệt đang chặn thông báo. Vui lòng bấm vào biểu tượng Ổ khóa / Cài đặt trên thanh địa chỉ để chuyển sang "Cho phép".',
+        type: 'error'
+      });
     } else {
-      setPushMessage({ text: 'Quyền thông báo bị từ chối trong trình duyệt.', type: 'error' });
+      setPushMessage({ text: 'Chưa cấp quyền thông báo.', type: 'info' });
     }
   };
 
@@ -222,21 +227,41 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
           
           {/* Permission Status Banner */}
           {permissionStatus !== 'granted' && (
-            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start space-x-3">
-              <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className={`p-3.5 rounded-2xl flex items-start space-x-3 border ${
+              permissionStatus === 'denied'
+                ? 'bg-rose-50 border-rose-200 text-rose-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}>
+              <AlertCircle size={20} className={permissionStatus === 'denied' ? 'text-rose-600 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'} />
               <div className="flex-1 text-xs">
-                <p className="font-bold text-amber-900 mb-1">Chưa bật quyền thông báo hệ thống</p>
-                <p className="text-amber-700 leading-relaxed mb-2">
-                  Để nhận thông báo khi đóng tab hoặc làm việc khác, vui lòng cho phép quyền thông báo.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleRequestPermission}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center space-x-1 shadow-xs transition-colors"
-                >
-                  <ShieldCheck size={14} />
-                  <span>Cho phép thông báo</span>
-                </button>
+                {permissionStatus === 'denied' ? (
+                  <>
+                    <p className="font-bold text-rose-950 mb-1">Trình duyệt đang chặn thông báo</p>
+                    <p className="text-rose-800 leading-relaxed mb-2">
+                      Bạn đã chặn quyền thông báo trước đó. Để bật lại:
+                    </p>
+                    <div className="bg-white/80 p-2 rounded-xl text-[11px] text-rose-900 space-y-1 mb-2 border border-rose-100">
+                      <div>1. Bấm vào biểu tượng <strong>Ổ khóa 🔒</strong> hoặc <strong>Cài đặt trang ⚙️</strong> ở đầu thanh địa chỉ web.</div>
+                      <div>2. Tìm mục <strong>Thông báo (Notifications)</strong> và chọn <strong>Cho phép (Allow)</strong>.</div>
+                      <div>3. Tải lại trang (F5) để áp dụng.</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-amber-900 mb-1">Chưa bật quyền thông báo hệ thống</p>
+                    <p className="text-amber-700 leading-relaxed mb-2">
+                      Để nhận thông báo khi đóng tab hoặc làm việc khác, vui lòng cho phép quyền thông báo.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRequestPermission}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center space-x-1 shadow-xs transition-colors"
+                    >
+                      <ShieldCheck size={14} />
+                      <span>Cho phép thông báo</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}

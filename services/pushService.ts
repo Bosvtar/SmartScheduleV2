@@ -92,9 +92,14 @@ export const subscribeToPush = async (forceResubscribe = false) => {
     throw new Error('Trình duyệt của bạn không hỗ trợ Web Push.');
   }
 
-  if (Notification.permission !== 'granted') {
+  if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+    if (Notification.permission === 'denied') {
+      throw new Error('Trình duyệt đang chặn thông báo. Vui lòng bấm vào biểu tượng Ổ khóa (hoặc biểu tượng Tune/Cài đặt) ở đầu thanh địa chỉ URL trình duyệt và chuyển "Thông báo (Notifications)" sang "Cho phép (Allow)".');
+    }
     const p = await Notification.requestPermission();
-    if (p !== 'granted') throw new Error('Bạn chưa cho phép quyền thông báo trên trình duyệt.');
+    if (p !== 'granted') {
+      throw new Error('Bạn chưa cấp quyền thông báo. Hãy bấm "Cho phép" khi trình duyệt hỏi để nhận thông báo lịch dạy.');
+    }
   }
 
   const reg = await ensureServiceWorker();
