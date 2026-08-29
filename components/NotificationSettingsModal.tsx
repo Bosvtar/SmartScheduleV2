@@ -185,8 +185,12 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setCronResult(null);
     try {
       const res = await triggerManualCronCheck();
-      setCronResult(`Cron OK: Giờ VN ${res.now?.timeStr} (${res.now?.dayOfWeek}), Đã quét ${res.checked} thiết bị, Đã gửi ${res.sent} nhắc nhở, Lỗi: ${res.errors}`);
-      setPushMessage({ text: `Đã chạy Cron thành công (quét ${res.checked} thiết bị, gửi ${res.sent} thông báo).`, type: 'success' });
+      const devCount = res.devicesCount ?? res.checked ?? 0;
+      setCronResult(`Cron Server OK: Giờ VN ${res.now?.timeStr} (${res.now?.dayOfWeek || res.now?.dateStr}) | Quét: ${res.checked} thiết bị (Tổng ${devCount} thiết bị trong Redis) | Gửi: ${res.sent} nhắc nhở | Lỗi: ${res.errors}`);
+      setPushMessage({ 
+        text: `Đã chạy Cron thành công (Quét ${res.checked} thiết bị, gửi ${res.sent} thông báo).`, 
+        type: 'success' 
+      });
     } catch (err: any) {
       setPushMessage({ text: `Lỗi kích hoạt Cron: ${err?.message || err}`, type: 'error' });
     } finally {
@@ -196,6 +200,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
 
   const handleSave = () => {
     onSave(formData);
+    syncPushState(getSchedules(), formData).catch(() => {});
     onClose();
   };
 

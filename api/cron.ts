@@ -167,6 +167,31 @@ async function sendPushNotification(subscription: any, payload: any) {
   return wp.sendNotification(subscription, JSON.stringify(payload), { TTL: 120 });
 }
 
+function normalizeDayOfWeek(day: string): string {
+  if (!day) return "";
+  const clean = day.trim().toLowerCase().replace(/\s+/g, " ");
+  if (clean.includes("2") || clean.includes("hai") || clean.includes("mon")) return "Thứ 2";
+  if (clean.includes("3") || clean.includes("ba") || clean.includes("tue")) return "Thứ 3";
+  if (clean.includes("4") || clean.includes("tư") || clean.includes("tu") || clean.includes("bốn") || clean.includes("bon") || clean.includes("wed")) return "Thứ 4";
+  if (clean.includes("5") || clean.includes("năm") || clean.includes("nam") || clean.includes("thu")) return "Thứ 5";
+  if (clean.includes("6") || clean.includes("sáu") || clean.includes("sau") || clean.includes("fri")) return "Thứ 6";
+  if (clean.includes("7") || clean.includes("bảy") || clean.includes("bay") || clean.includes("sat")) return "Thứ 7";
+  if (clean.includes("nhật") || clean.includes("nhat") || clean.includes("cn") || clean.includes("sun")) return "Chủ Nhật";
+  return day.trim();
+}
+
+function normalizeDateStr(dateStr?: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.trim().split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    const d = parts[0].padStart(2, "0");
+    const m = parts[1].padStart(2, "0");
+    const y = parts[2];
+    return `${d}/${m}/${y}`;
+  }
+  return dateStr.trim();
+}
+
 function getVietnamNow(date = new Date()) {
   try {
     const parts = new Intl.DateTimeFormat("en-GB", {
@@ -191,18 +216,28 @@ function getVietnamNow(date = new Date()) {
     };
   } catch {
     const d = new Date();
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hour = String(d.getHours()).padStart(2, "0");
+    const minute = String(d.getMinutes()).padStart(2, "0");
     return {
-      dateStr: `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`,
-      timeStr: `${d.getHours()}:${d.getMinutes()}`,
+      dateStr: `${day}/${month}/${year}`,
+      timeStr: `${hour}:${minute}`,
       totalMinutes: d.getHours() * 60 + d.getMinutes(),
       dayOfWeek: "Thứ 2",
     };
   }
 }
 
-function toMinutes(hhmm: string) {
-  const [h, m] = String(hhmm || "").split(":").map(Number);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN;
+function toMinutes(raw: string) {
+  if (!raw) return NaN;
+  const clean = String(raw).trim().replace(/h/i, ":");
+  const parts = clean.split(":").map(p => parseInt(p.trim(), 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+    return parts[0] * 60 + parts[1];
+  }
+  return NaN;
 }
 
 function tomorrowDateStr(now = new Date()) {
@@ -273,13 +308,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!settings.enabled) continue;
 
         const due: { key: string; title: string; body: string }[] = [];
+        const matchedTodaySessions: any[] = [];
+
         for (const item of device.schedules || []) {
-          const isToday = item.date ? item.date === now.dateStr : item.dayOfWeek === now.dayOfWeek;
+          const itemDateNorm = normalizeDateStr(item.date);
+          const itemDayNorm = normalizeDayOfWeek(item.dayOfWeek);
+          const nowDayNorm = normalizeDayOfWeek(now.dayOfWeek);
+
+          // Buổi dạy hôm nay nếu: Có ngày trùng ngày hôm nay, hoặc không có ngày/ngày cũ nhưng thứ trong tuần khớp
+          const isToday = itemDateNorm ? (itemDateNorm === now.dateStr) : (itemDayNorm === nowDayNorm);
           if (!isToday) continue;
+
+          matchedTodaySessions.push(item);
           const start = toMinutes(item.startTime);
-          for (const offset of settings.notifyMinutesBefore || [15]) {
+          if (!Number.isFinite(start)) continue;
+
+          for (const offset of (settings.notifyMinutesBefore || [15])) {
             const target = start - Number(offset);
-            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
+            // Cửa sổ gửi thông báo: Từ thời điểm cần nhắc (start - offset) cho đến khi bắt đầu hoặc trễ tối đa 15 phút
+            const windowEnd = Math.min(start + 5, target + 20);
+            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= windowEnd) {
               due.push({
                 key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
                 title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
@@ -290,13 +338,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (settings.dayBeforeReminder && settings.dayBeforeReminderTime) {
-          const [remH, remM] = String(settings.dayBeforeReminderTime).split(":").map(Number);
-          const remMinutes = Number.isFinite(remH) && Number.isFinite(remM) ? remH * 60 + remM : NaN;
-          if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 15) {
+          const remMinutes = toMinutes(settings.dayBeforeReminderTime);
+          if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 30) {
             const tDate = tomorrowDateStr();
             const tDay = tomorrowDay();
+            const tDayNorm = normalizeDayOfWeek(tDay);
             const sessions = (device.schedules || [])
-              .filter((i: any) => (i.date ? i.date === tDate : i.dayOfWeek === tDay))
+              .filter((i: any) => {
+                const iDate = normalizeDateStr(i.date);
+                const iDay = normalizeDayOfWeek(i.dayOfWeek);
+                return iDate ? iDate === tDate : iDay === tDayNorm;
+              })
               .sort((a: any, b: any) => String(a.startTime).localeCompare(String(b.startTime)));
             if (sessions.length) {
               const preview = sessions.slice(0, 2).map((s: any) => `${s.subject} (${s.startTime})`).join(", ");
@@ -332,7 +384,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res.status(200).json({ ok: true, now, checked, sent, errors });
+    return res.status(200).json({
+      ok: true,
+      now,
+      checked,
+      sent,
+      errors,
+      devicesCount: ids.length,
+    });
   } catch (globalErr: any) {
     console.error("Cron handler caught error:", globalErr);
     return res.status(200).json({

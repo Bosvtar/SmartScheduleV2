@@ -1455,14 +1455,15 @@ function App() {
           const diffMinutes = classTime - currentTime;
 
           (notificationSettings.notifyMinutesBefore || [15]).forEach(minOffset => {
-            if (diffMinutes <= minOffset && diffMinutes > minOffset - 1) {
+            if (diffMinutes >= 0 && diffMinutes <= minOffset) {
               const notifyKey = `${todayDateStr}_${item.id}_offset_${minOffset}`;
               if (!notifiedKeysRef.current.has(notifyKey)) {
                 notifiedKeysRef.current.add(notifyKey);
                 const classTitle = item.className ? `Lớp ${item.className}` : 'Buổi dạy';
+                const timeText = diffMinutes <= 1 ? 'Sắp vào lớp' : `còn ${diffMinutes} phút`;
                 dispatchNotification(
-                  `🔔 Nhắc lịch dạy (${minOffset} phút nữa): ${item.subject}`,
-                  `${classTitle} tại ${item.location} • Giờ học: ${item.startTime}${item.lessonName ? ` • ${item.lessonName}` : ''}`,
+                  `🔔 Nhắc lịch dạy (${timeText}): ${item.subject}`,
+                  `${classTitle} tại ${item.location || 'Chưa cập nhật phòng'} • Bắt đầu lúc ${item.startTime}${item.lessonName ? ` • ${item.lessonName}` : ''}`,
                   notificationSettings
                 );
               }
