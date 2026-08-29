@@ -3,23 +3,22 @@ import {
   ScheduleItem, 
   DAYS_ORDER, 
   getPeriodLabelFromTime, 
-  getClassColorTheme,
-  getDayOfWeekFromDate
+  getClassColorTheme
 } from '../types';
 import { 
   X, 
   Calendar, 
   CalendarCheck, 
   CalendarDays, 
+  CalendarRange,
   Clock, 
   MapPin, 
   BookOpen, 
   CheckCircle2, 
-  Sparkles, 
   ChevronRight, 
   Sun,
   Coffee,
-  Check
+  Sparkles
 } from 'lucide-react';
 
 interface ScheduleCheckModalProps {
@@ -28,16 +27,9 @@ interface ScheduleCheckModalProps {
   schedules: ScheduleItem[];
   customColorMap?: Record<string, string>;
   onSelectScheduleItem?: (item: ScheduleItem) => void;
-  onApplyFilter?: (scope: 'all' | 'today' | 'this_week') => void;
-  initialTab?: 'today' | 'week';
+  onApplyFilter?: (scope: 'all' | 'today' | 'this_week' | 'next_week') => void;
+  initialTab?: 'today' | 'week' | 'next_week';
 }
-
-const parseDateObj = (dateStr?: string): Date | null => {
-  if (!dateStr) return null;
-  const parts = dateStr.split('/');
-  if (parts.length !== 3) return null;
-  return new Date(`${parts[1]}/${parts[0]}/${parts[2]}`);
-};
 
 const getWeekBoundary = (date: Date) => {
   const day = date.getDay(); // 0 is Sunday
@@ -71,14 +63,16 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
   onApplyFilter,
   initialTab = 'today',
 }) => {
-  const [activeTab, setActiveTab] = useState<'today' | 'week'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'today' | 'week' | 'next_week'>(initialTab);
   const [selectedWeekDayFilter, setSelectedWeekDayFilter] = useState<string | null>(null);
+  const [selectedNextWeekDayFilter, setSelectedNextWeekDayFilter] = useState<string | null>(null);
 
   // Sync initialTab when modal opens
   React.useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
       setSelectedWeekDayFilter(null);
+      setSelectedNextWeekDayFilter(null);
     }
   }, [isOpen, initialTab]);
 
@@ -88,9 +82,17 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
   const todayVi = jsDayToViDay[todayIndex];
   const todayDateStr = formatDateFull(today);
 
-  // Week boundaries
+  // 1. THIS WEEK BOUNDARIES
   const { start: weekStart, end: weekEnd } = useMemo(() => getWeekBoundary(today), [today]);
   const weekLabel = `${formatDateDM(weekStart)} - ${formatDateDM(weekEnd)}`;
+
+  // 2. NEXT WEEK BOUNDARIES
+  const { start: nextWeekStart, end: nextWeekEnd } = useMemo(() => {
+    const nextWeekDate = new Date(today);
+    nextWeekDate.setDate(today.getDate() + 7);
+    return getWeekBoundary(nextWeekDate);
+  }, [today]);
+  const nextWeekLabel = `${formatDateDM(nextWeekStart)} - ${formatDateDM(nextWeekEnd)}`;
 
   // 1. TODAY'S SESSIONS
   const todaySessions = useMemo(() => {
@@ -102,14 +104,12 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
     }).sort((a, b) => a.startTime.localeCompare(b.startTime));
   }, [schedules, todayDateStr, todayVi]);
 
-  // Today's total periods
   const todayTotalPeriods = useMemo(() => {
     return todaySessions.reduce((sum, item) => sum + (item.periodsCount || 1), 0);
   }, [todaySessions]);
 
   // 2. THIS WEEK'S SESSIONS (Grouped by Day of Week: T2 -> CN)
   const weekDaysInfo = useMemo(() => {
-    // Generate dates for Monday..Sunday
     return DAYS_ORDER.map((dayName, idx) => {
       const targetDate = new Date(weekStart);
       targetDate.setDate(weekStart.getDate() + idx);
@@ -149,9 +149,49 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
     return weekDaysInfo.filter(d => d.sessions.length > 0).length;
   }, [weekDaysInfo]);
 
+  // 3. NEXT WEEK'S SESSIONS (Grouped by Day of Week: T2 -> CN)
+  const nextWeekDaysInfo = useMemo(() => {
+    return DAYS_ORDER.map((dayName, idx) => {
+      const targetDate = new Date(nextWeekStart);
+      targetDate.setDate(nextWeekStart.getDate() + idx);
+      const targetDateStr = formatDateFull(targetDate);
+      const targetDateDM = formatDateDM(targetDate);
+
+      // Find sessions for this day in next week
+      const sessions = schedules.filter(item => {
+        if (item.date && item.date.trim() !== '') {
+          return item.date === targetDateStr;
+        }
+        return item.dayOfWeek === dayName;
+      }).sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+      return {
+        dayName,
+        date: targetDate,
+        dateStr: targetDateStr,
+        dateDM: targetDateDM,
+        isToday: false,
+        sessions,
+        periodsCount: sessions.reduce((s, i) => s + (i.periodsCount || 1), 0)
+      };
+    });
+  }, [schedules, nextWeekStart]);
+
+  const totalNextWeekSessions = useMemo(() => {
+    return nextWeekDaysInfo.reduce((sum, day) => sum + day.sessions.length, 0);
+  }, [nextWeekDaysInfo]);
+
+  const totalNextWeekPeriods = useMemo(() => {
+    return nextWeekDaysInfo.reduce((sum, day) => sum + day.periodsCount, 0);
+  }, [nextWeekDaysInfo]);
+
+  const activeNextWeekDaysCount = useMemo(() => {
+    return nextWeekDaysInfo.filter(d => d.sessions.length > 0).length;
+  }, [nextWeekDaysInfo]);
+
   if (!isOpen) return null;
 
-  const handleApplyScope = (scope: 'today' | 'this_week') => {
+  const handleApplyScope = (scope: 'today' | 'this_week' | 'next_week') => {
     if (onApplyFilter) {
       onApplyFilter(scope);
     }
@@ -184,19 +224,22 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
           </button>
         </div>
 
-        {/* Top Scope Tabs */}
-        <div className="p-3 bg-gray-50/90 border-b border-gray-200/80 flex items-center gap-2">
+        {/* Top Scope Tabs (Hôm nay / Tuần này / Tuần sau) */}
+        <div className="p-3 bg-gray-50/90 border-b border-gray-200/80 flex items-center gap-1.5">
+          {/* Tab 1: Hôm nay */}
           <button
             type="button"
             onClick={() => setActiveTab('today')}
-            className={`flex-1 py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center space-x-2 transition-all ${
+            className={`flex-1 py-2 px-2 rounded-2xl font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all ${
               activeTab === 'today'
                 ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                 : 'bg-white text-gray-600 border border-gray-200/90 hover:bg-gray-100/70'
             }`}
           >
-            <Clock size={15} />
-            <span>Hôm nay</span>
+            <div className="flex items-center space-x-1">
+              <Clock size={13} />
+              <span>Hôm nay</span>
+            </div>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
               activeTab === 'today' ? 'bg-white/20 text-white' : todaySessions.length > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-500'
             }`}>
@@ -204,21 +247,45 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
             </span>
           </button>
 
+          {/* Tab 2: Tuần hiện tại */}
           <button
             type="button"
             onClick={() => setActiveTab('week')}
-            className={`flex-1 py-2.5 px-3 rounded-2xl font-bold text-xs flex items-center justify-center space-x-2 transition-all ${
+            className={`flex-1 py-2 px-2 rounded-2xl font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all ${
               activeTab === 'week'
                 ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                 : 'bg-white text-gray-600 border border-gray-200/90 hover:bg-gray-100/70'
             }`}
           >
-            <CalendarDays size={15} />
-            <span>Tuần hiện tại</span>
+            <div className="flex items-center space-x-1">
+              <CalendarDays size={13} />
+              <span>Tuần này</span>
+            </div>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
               activeTab === 'week' ? 'bg-white/20 text-white' : totalWeekSessions > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
             }`}>
               {totalWeekSessions > 0 ? `${totalWeekSessions} buổi` : '0 buổi'}
+            </span>
+          </button>
+
+          {/* Tab 3: Tuần sau */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('next_week')}
+            className={`flex-1 py-2 px-2 rounded-2xl font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all ${
+              activeTab === 'next_week'
+                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                : 'bg-white text-gray-600 border border-gray-200/90 hover:bg-gray-100/70'
+            }`}
+          >
+            <div className="flex items-center space-x-1">
+              <CalendarRange size={13} />
+              <span>Tuần sau</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              activeTab === 'next_week' ? 'bg-white/20 text-white' : totalNextWeekSessions > 0 ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-500'
+            }`}>
+              {totalNextWeekSessions > 0 ? `${totalNextWeekSessions} buổi` : '0 buổi'}
             </span>
           </button>
         </div>
@@ -295,7 +362,7 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
                         {/* Accent Bar */}
                         <div 
                           className="absolute left-0 top-0 bottom-0 w-1.5" 
-                          style={{ backgroundColor: theme.dotColor }}
+                          style={{ backgroundColor: theme.dotColor }} 
                         />
 
                         <div className="pl-2">
@@ -354,15 +421,24 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
                   <Sun className="mx-auto text-amber-500 mb-2" size={32} />
                   <p className="text-xs font-bold text-gray-700">Tận hưởng ngày nghỉ thảnh thơi!</p>
                   <p className="text-[11px] text-gray-400 mt-1 mb-4">
-                    Bạn có thể kiểm tra lịch các ngày khác trong tuần bằng cách chọn tab "Tuần hiện tại".
+                    Bạn có thể kiểm tra lịch các ngày khác bằng cách chọn tab "Tuần này" hoặc "Tuần sau".
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('week')}
-                    className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-xs hover:bg-indigo-700 transition-colors"
-                  >
-                    Xem lịch tuần này
-                  </button>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('week')}
+                      className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-xs hover:bg-indigo-700 transition-colors"
+                    >
+                      Xem tuần này
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('next_week')}
+                      className="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-xl shadow-xs hover:bg-gray-50 transition-colors"
+                    >
+                      Xem tuần sau
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -403,7 +479,7 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
               {/* 7-Day Quick Strip Visual Bar */}
               <div className="space-y-1.5">
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
-                  Tổng quan từng ngày trong tuần
+                  Tổng quan từng ngày trong tuần này
                 </span>
                 <div className="grid grid-cols-7 gap-1 bg-gray-50 p-1.5 rounded-2xl border border-gray-200/80">
                   {weekDaysInfo.map(d => {
@@ -539,6 +615,169 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
 
             </div>
           )}
+
+          {/* TAB 3: NEXT WEEK CHECK */}
+          {activeTab === 'next_week' && (
+            <div className="space-y-3.5">
+              {/* Next Week Overview Card */}
+              <div className="p-3.5 bg-gradient-to-br from-purple-50 to-indigo-50/60 border border-purple-100 rounded-2xl flex items-center justify-between">
+                <div>
+                  <div className="flex items-center space-x-1.5 text-xs text-purple-700 font-bold mb-0.5">
+                    <CalendarRange size={14} />
+                    <span>Tuần tới: {nextWeekLabel}</span>
+                  </div>
+                  <h4 className="font-bold text-sm text-purple-950">
+                    {totalNextWeekSessions > 0 ? (
+                      `Tuần sau có ${totalNextWeekSessions} buổi dạy (${totalNextWeekPeriods} tiết)`
+                    ) : (
+                      'Tuần sau không có lịch dạy nào'
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-purple-600">
+                    {totalNextWeekSessions > 0 ? `Dự kiến dạy trong ${activeNextWeekDaysCount}/7 ngày` : 'Chưa có buổi học nào được lên lịch cho tuần sau'}
+                  </p>
+                </div>
+                {totalNextWeekSessions > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleApplyScope('next_week')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold rounded-xl shadow-xs transition-colors shrink-0"
+                  >
+                    Lọc tuần sau
+                  </button>
+                )}
+              </div>
+
+              {/* 7-Day Quick Strip Visual Bar for Next Week */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
+                  Tổng quan từng ngày trong tuần sau
+                </span>
+                <div className="grid grid-cols-7 gap-1 bg-gray-50 p-1.5 rounded-2xl border border-gray-200/80">
+                  {nextWeekDaysInfo.map(d => {
+                    const isSelected = selectedNextWeekDayFilter === d.dayName;
+                    const hasClasses = d.sessions.length > 0;
+
+                    return (
+                      <button
+                        key={d.dayName}
+                        type="button"
+                        onClick={() => {
+                          setSelectedNextWeekDayFilter(isSelected ? null : d.dayName);
+                        }}
+                        className={`p-1.5 rounded-xl flex flex-col items-center justify-center transition-all text-center relative ${
+                          isSelected
+                            ? 'bg-purple-600 text-white shadow-xs'
+                            : hasClasses
+                            ? 'bg-white text-gray-800 border border-purple-200/90 hover:bg-purple-50/50'
+                            : 'bg-gray-100/70 text-gray-400 border border-transparent'
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold">
+                          {d.dayName.replace('Thứ ', 'T')}
+                        </span>
+                        <span className="text-[9px] opacity-80">
+                          {d.dateDM.split('/')[0]}
+                        </span>
+                        
+                        {/* Session count pill */}
+                        <div className="mt-1">
+                          {hasClasses ? (
+                            <span className={`w-4 h-4 rounded-full text-[9px] font-extrabold flex items-center justify-center ${
+                              isSelected ? 'bg-white text-purple-700' : 'bg-purple-100 text-purple-700'
+                            }`}>
+                              {d.sessions.length}
+                            </span>
+                          ) : (
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300 mx-auto my-1.5" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedNextWeekDayFilter && (
+                  <div className="flex items-center justify-between px-1 text-xs text-purple-700 font-semibold">
+                    <span>Đang lọc xem riêng: {selectedNextWeekDayFilter}</span>
+                    <button 
+                      onClick={() => setSelectedNextWeekDayFilter(null)} 
+                      className="underline text-gray-500 hover:text-gray-800"
+                    >
+                      Xem tất cả ngày
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Next Week Day-by-Day Breakdown */}
+              <div className="space-y-3">
+                {nextWeekDaysInfo
+                  .filter(d => !selectedNextWeekDayFilter || d.dayName === selectedNextWeekDayFilter)
+                  .map(d => {
+                    const hasClasses = d.sessions.length > 0;
+
+                    return (
+                      <div 
+                        key={d.dayName} 
+                        className={`rounded-2xl border transition-all ${
+                          hasClasses 
+                            ? 'border-gray-200/90 bg-white p-3 shadow-2xs' 
+                            : 'border-gray-100 bg-gray-50/50 p-2.5 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-xs text-gray-800">
+                              {d.dayName} ({d.dateDM})
+                            </span>
+                          </div>
+                          <span className={`text-[11px] font-bold ${hasClasses ? 'text-purple-700' : 'text-gray-400'}`}>
+                            {hasClasses ? `${d.sessions.length} buổi (${d.periodsCount} tiết)` : 'Nghỉ'}
+                          </span>
+                        </div>
+
+                        {hasClasses ? (
+                          <div className="space-y-2 pl-2 border-l-2 border-purple-100">
+                            {d.sessions.map(item => {
+                              const theme = getClassColorTheme(item.className, customColorMap);
+                              return (
+                                <div 
+                                  key={item.id}
+                                  onClick={() => {
+                                    if (onSelectScheduleItem) onSelectScheduleItem(item);
+                                    onClose();
+                                  }}
+                                  className="bg-white p-2.5 rounded-xl border border-gray-200/70 hover:border-purple-300 transition-all cursor-pointer text-xs flex items-center justify-between gap-2 shadow-2xs"
+                                >
+                                  <div className="flex items-center space-x-2 min-w-0">
+                                    <span 
+                                      className="w-2 h-2 rounded-full shrink-0" 
+                                      style={{ backgroundColor: theme.dotColor }} 
+                                    />
+                                    <div className="truncate">
+                                      <span className="font-bold text-gray-900 mr-1.5">{item.subject}</span>
+                                      {item.className && (
+                                        <span className="text-gray-500 font-semibold">({item.className})</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-md text-[11px]">
+                                    {item.startTime}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 italic">Không có lịch dạy</p>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+
+            </div>
+          )}
         </div>
 
         {/* Modal Footer */}
@@ -561,13 +800,22 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
                 <span>Xem lịch Hôm nay</span>
                 <ChevronRight size={14} />
               </button>
-            ) : (
+            ) : activeTab === 'week' ? (
               <button
                 type="button"
                 onClick={() => handleApplyScope('this_week')}
                 className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-sm transition-all"
               >
                 <span>Xem toàn bộ Tuần này</span>
+                <ChevronRight size={14} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleApplyScope('next_week')}
+                className="py-2.5 px-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow-sm transition-all"
+              >
+                <span>Xem toàn bộ Tuần sau</span>
                 <ChevronRight size={14} />
               </button>
             )}
@@ -580,3 +828,4 @@ const ScheduleCheckModal: React.FC<ScheduleCheckModalProps> = ({
 };
 
 export default ScheduleCheckModal;
+

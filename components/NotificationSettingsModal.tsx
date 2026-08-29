@@ -14,10 +14,7 @@ import {
   ShieldCheck,
   RefreshCw,
   Server,
-  Database,
-  Info,
-  ChevronDown,
-  ChevronUp
+  Database
 } from 'lucide-react';
 import { NotificationSettings } from '../types';
 import { 
@@ -73,7 +70,6 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
   const [pushMessage, setPushMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [backendConfig, setBackendConfig] = useState<PushBackendConfig | null>(null);
-  const [showVercelGuide, setShowVercelGuide] = useState(false);
   const [cronResult, setCronResult] = useState<string | null>(null);
 
   useEffect(() => {
@@ -97,7 +93,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
       setPushMessage({ text: 'Đã cấp quyền thông báo thành công!', type: 'success' });
     } else if (status === 'denied') {
       setPushMessage({
-        text: 'Trình duyệt đang chặn thông báo. Vui lòng bấm vào biểu tượng Ổ khóa / Cài đặt trên thanh địa chỉ để chuyển sang "Cho phép".',
+        text: 'Trình duyệt đang chặn thông báo. Vui lòng cho phép quyền thông báo trong cài đặt trang.',
         type: 'error'
       });
     } else {
@@ -216,7 +212,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
             </div>
             <div>
               <h2 className="font-bold text-lg text-white">Cài Đặt Thông Báo</h2>
-              <p className="text-xs text-indigo-100">Web Push, chuông báo & đồng bộ nền</p>
+              <p className="text-xs text-indigo-100">Chuông báo, giờ nhắc & Web Push</p>
             </div>
           </div>
           <button
@@ -232,42 +228,29 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
           
           {/* Permission Status Banner */}
           {permissionStatus !== 'granted' && (
-            <div className={`p-3.5 rounded-2xl flex items-start space-x-3 border ${
+            <div className={`p-3.5 rounded-2xl flex items-center justify-between gap-3 border ${
               permissionStatus === 'denied'
                 ? 'bg-rose-50 border-rose-200 text-rose-900'
                 : 'bg-amber-50 border-amber-200 text-amber-900'
             }`}>
-              <AlertCircle size={20} className={permissionStatus === 'denied' ? 'text-rose-600 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'} />
-              <div className="flex-1 text-xs">
-                {permissionStatus === 'denied' ? (
-                  <>
-                    <p className="font-bold text-rose-950 mb-1">Trình duyệt đang chặn thông báo</p>
-                    <p className="text-rose-800 leading-relaxed mb-2">
-                      Bạn đã chặn quyền thông báo trước đó. Để bật lại:
-                    </p>
-                    <div className="bg-white/80 p-2 rounded-xl text-[11px] text-rose-900 space-y-1 mb-2 border border-rose-100">
-                      <div>1. Bấm vào biểu tượng <strong>Ổ khóa 🔒</strong> hoặc <strong>Cài đặt trang ⚙️</strong> ở đầu thanh địa chỉ web.</div>
-                      <div>2. Tìm mục <strong>Thông báo (Notifications)</strong> và chọn <strong>Cho phép (Allow)</strong>.</div>
-                      <div>3. Tải lại trang (F5) để áp dụng.</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-bold text-amber-900 mb-1">Chưa bật quyền thông báo hệ thống</p>
-                    <p className="text-amber-700 leading-relaxed mb-2">
-                      Để nhận thông báo khi đóng tab hoặc làm việc khác, vui lòng cho phép quyền thông báo.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleRequestPermission}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center space-x-1 shadow-xs transition-colors"
-                    >
-                      <ShieldCheck size={14} />
-                      <span>Cho phép thông báo</span>
-                    </button>
-                  </>
-                )}
+              <div className="flex items-center space-x-2.5">
+                <AlertCircle size={18} className={permissionStatus === 'denied' ? 'text-rose-600 shrink-0' : 'text-amber-600 shrink-0'} />
+                <span className="text-xs font-semibold">
+                  {permissionStatus === 'denied' 
+                    ? 'Quyền thông báo đang bị chặn trên trình duyệt' 
+                    : 'Chưa cấp quyền thông báo hệ thống'}
+                </span>
               </div>
+              {permissionStatus !== 'denied' && (
+                <button
+                  type="button"
+                  onClick={handleRequestPermission}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1 shrink-0 transition-colors"
+                >
+                  <ShieldCheck size={13} />
+                  <span>Cho phép</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -291,121 +274,6 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
             </label>
-          </div>
-
-          {/* Web Push Server Section */}
-          <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-blue-50/60 rounded-2xl border border-indigo-100/80 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2 bg-indigo-600 text-white rounded-xl">
-                  <Server size={16} />
-                </div>
-                <div>
-                  <span className="font-bold text-xs text-indigo-950 block">Thông báo nền Web Push (Vercel)</span>
-                  <span className="text-[11px] text-indigo-700">Nhắc nhở tự động qua Vercel Cron kể cả khi tắt app</span>
-                </div>
-              </div>
-              <button 
-                type="button" 
-                onClick={handleEnablePush} 
-                disabled={pushBusy} 
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
-                  pushSubscribed 
-                    ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                } disabled:opacity-50`}
-              >
-                {pushBusy ? 'Đang xử lý...' : pushSubscribed ? 'Đã kết nối ✓' : 'Bật Web Push'}
-              </button>
-            </div>
-
-            {/* Diagnostic Badges */}
-            <div className="flex flex-wrap gap-1.5 text-[10px]">
-              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${permissionStatus === 'granted' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                Quyền: {permissionStatus === 'granted' ? 'Đã cấp' : 'Chưa cấp'}
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${pushSubscribed ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
-                Web Push: {pushSubscribed ? 'Đã kích hoạt' : 'Chưa kích hoạt'}
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
-                <Database size={10} className="text-indigo-600" />
-                Redis: {backendConfig?.isUpstashConfigured ? 'Upstash đã kết nối ✓' : 'Bộ nhớ tạm (Vercel)'}
-              </span>
-            </div>
-
-            {/* Status Message */}
-            {pushMessage && (
-              <div className={`p-2.5 rounded-xl text-xs font-medium ${
-                pushMessage.type === 'success' 
-                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                  : pushMessage.type === 'error'
-                  ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                  : 'bg-blue-50 text-blue-800 border border-blue-200'
-              }`}>
-                {pushMessage.text}
-              </div>
-            )}
-
-            {/* Action Buttons for Push */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={handleSendTestNotification}
-                disabled={pushBusy}
-                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
-              >
-                <Sparkles size={14} />
-                <span>{testSent ? 'Đã gửi ✓' : 'Gửi thử Web Push'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleTestCron}
-                disabled={pushBusy}
-                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
-              >
-                <RefreshCw size={13} className={pushBusy ? 'animate-spin' : ''} />
-                <span>Kiểm tra Cron</span>
-              </button>
-            </div>
-
-            {cronResult && (
-              <div className="p-2 bg-white/90 border border-indigo-100 rounded-xl text-[11px] text-indigo-900 font-mono">
-                {cronResult}
-              </div>
-            )}
-
-            {/* Collapsible cron-job.org Setup Guide */}
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setShowVercelGuide(!showVercelGuide)}
-                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 transition-colors"
-              >
-                <Info size={12} />
-                <span>Hướng dẫn thiết lập cron-job.org (Miễn phí & Tự động 24/7)</span>
-                {showVercelGuide ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              </button>
-
-              {showVercelGuide && (
-                <div className="mt-2 p-3 bg-white rounded-xl border border-indigo-100 text-[11px] text-gray-700 space-y-2.5 leading-relaxed">
-                  <p className="font-bold text-gray-900">Các bước thiết lập cron-job.org để nhận thông báo tự động:</p>
-                  <ol className="list-decimal pl-4 space-y-1.5">
-                    <li>Đăng ký tài khoản miễn phí tại <a href="https://cron-job.org" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">cron-job.org</a>.</li>
-                    <li>Tạo một <strong>Cronjob mới (Create Cronjob)</strong>:
-                      <div className="mt-1 bg-gray-50 p-2 rounded border border-gray-200 text-[11px] text-gray-800 space-y-1">
-                        <div><strong>Title:</strong> SmartSchedule Push Reminder</div>
-                        <div><strong>URL:</strong> <code className="bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded font-mono">{typeof window !== 'undefined' ? `${window.location.origin}/api/cron` : 'https://your-domain.vercel.app/api/cron'}</code></div>
-                        <div><strong>Execution schedule:</strong> Chọn <em>Every 1 minute</em> (hoặc <em>Every 5 minutes</em>)</div>
-                        <div><strong>Request Method:</strong> GET</div>
-                      </div>
-                    </li>
-                    <li>Bấm <strong>Create</strong>. Từ lúc này, cron-job.org sẽ tự động kích hoạt máy chủ kiểm tra và gửi thông báo đẩy đến điện thoại/máy tính của bạn đúng giờ mà không tốn phí!</li>
-                  </ol>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Section: Minutes Before Class */}
@@ -567,6 +435,91 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               </label>
             </div>
           </div>
+
+          {/* Section: Web Push Server & Testing (Moved to Bottom) */}
+          <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-blue-50/60 rounded-2xl border border-indigo-100/80 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-indigo-600 text-white rounded-xl">
+                  <Server size={16} />
+                </div>
+                <div>
+                  <span className="font-bold text-xs text-indigo-950 block">Kiểm tra Web Push & Cron Server</span>
+                  <span className="text-[11px] text-indigo-700">Đồng bộ máy chủ và nhận thông báo nền</span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={handleEnablePush} 
+                disabled={pushBusy} 
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                  pushSubscribed 
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                } disabled:opacity-50`}
+              >
+                {pushBusy ? 'Đang xử lý...' : pushSubscribed ? 'Đã kết nối ✓' : 'Bật Web Push'}
+              </button>
+            </div>
+
+            {/* Diagnostic Badges */}
+            <div className="flex flex-wrap gap-1.5 text-[10px]">
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${permissionStatus === 'granted' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                Quyền: {permissionStatus === 'granted' ? 'Đã cấp' : 'Chưa cấp'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${pushSubscribed ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
+                Web Push: {pushSubscribed ? 'Đã kích hoạt' : 'Chưa kích hoạt'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <Database size={10} className="text-indigo-600" />
+                Redis: {backendConfig?.isUpstashConfigured ? 'Upstash đã kết nối ✓' : 'Bộ nhớ tạm (Vercel)'}
+              </span>
+            </div>
+
+            {/* Status Message */}
+            {pushMessage && (
+              <div className={`p-2.5 rounded-xl text-xs font-medium ${
+                pushMessage.type === 'success' 
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                  : pushMessage.type === 'error'
+                  ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                  : 'bg-blue-50 text-blue-800 border border-blue-200'
+              }`}>
+                {pushMessage.text}
+              </div>
+            )}
+
+            {/* Action Buttons for Push & Cron Testing */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                disabled={pushBusy}
+                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+              >
+                <Sparkles size={14} />
+                <span>{testSent ? 'Đã gửi ✓' : 'Gửi thử Web Push'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestCron}
+                disabled={pushBusy}
+                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+              >
+                <RefreshCw size={13} className={pushBusy ? 'animate-spin' : ''} />
+                <span>Kiểm tra Cron</span>
+              </button>
+            </div>
+
+            {cronResult && (
+              <div className="p-2 bg-white/90 border border-indigo-100 rounded-xl text-[11px] text-indigo-900 font-mono">
+                {cronResult}
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* Footer Actions */}
@@ -593,3 +546,4 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
 };
 
 export default NotificationSettingsModal;
+
