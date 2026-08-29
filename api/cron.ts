@@ -4,9 +4,9 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 const memoryStore = new Map<string, any>();
 const memorySets = new Map<string, Set<string>>();
 
-const DEFAULT_VAPID_PUBLIC_KEY = "BEgl5nFnHZId0neRHh_opBKRNuOWO-bST34Dv5dNY9kPtjkxS6Tr0RNe5EHlhiuyTQ1U_jZCpEBprwjvnH-cG34";
-const DEFAULT_VAPID_PRIVATE_KEY = "E80fL0wqI0kzSNqMK_Xh6n-QawObczy1xzo3h20hvvw";
-const DEFAULT_VAPID_SUBJECT = "mailto:smartschedule@app.internal";
+const DEFAULT_VAPID_PUBLIC_KEY = "BGqsbtamMJRqSSfWHyXzzH2y9iXUBiyHGLUpw4pl7jcF7OO8Raw0d9aHoUAYtb-98MHERF0xgiDMB_atgyt0kPs";
+const DEFAULT_VAPID_PRIVATE_KEY = "ZD_48yMiorSMHHYa5trlNfoiNBy8V5LMdZrytD89FiI";
+const DEFAULT_VAPID_SUBJECT = "mailto:smartschedule.app@gmail.com";
 
 function isValidBase64Key(key: string | undefined, minLen = 30): boolean {
   if (!key || typeof key !== "string") return false;

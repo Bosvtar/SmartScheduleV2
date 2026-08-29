@@ -128,7 +128,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     }
   };
 
-  const handleEnablePush = async (force = false) => {
+  const handleEnablePush = async (force = true) => {
     setPushBusy(true);
     setPushMessage(null);
     try {
@@ -157,7 +157,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setPushBusy(true);
     setPushMessage(null);
     try {
-      await subscribeToPush(false);
+      await subscribeToPush(true);
       setPushSubscribed(true);
       await syncPushState(getSchedules(), { ...formData, enabled: true });
       await sendServerPushTest(true);
