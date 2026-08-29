@@ -38,9 +38,12 @@ export interface PushBackendConfig {
   timestamp?: string;
 }
 
-export const fetchPushConfig = async (): Promise<PushBackendConfig> => {
+export const fetchPushConfig = async (forceFresh = false): Promise<PushBackendConfig> => {
   try {
-    const res = await fetch('/api/push-config');
+    const res = await fetch(`/api/push-config?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
     if (res.ok) {
       const data: PushBackendConfig = await res.json();
       if (data?.publicKey) {
@@ -104,11 +107,9 @@ export const subscribeToPush = async (forceResubscribe = false) => {
 
   const reg = await ensureServiceWorker();
 
-  let key = cachedVapidPublicKey || (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY;
-  if (!key) {
-    const cfg = await fetchPushConfig();
-    key = cfg.publicKey;
-  }
+  // Luôn lấy VAPID Public Key mới nhất từ máy chủ
+  const cfg = await fetchPushConfig(true);
+  const key = cfg.publicKey;
 
   if (!key) {
     throw new Error('Không tìm thấy VAPID Public Key để kích hoạt Web Push.');
