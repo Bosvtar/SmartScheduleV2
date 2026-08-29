@@ -25,6 +25,11 @@ function tomorrowDateStr(now = new Date()) {
 function tomorrowDay(now = new Date()) { return getVietnamNow(new Date(now.getTime()+86400000)).dayOfWeek; }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
   if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
   if (!authorized(req)) return res.status(401).json({ error: "Unauthorized" });
   const now = getVietnamNow();

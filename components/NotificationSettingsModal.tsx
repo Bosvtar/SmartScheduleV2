@@ -371,7 +371,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               </div>
             )}
 
-            {/* Collapsible Vercel Setup Guide */}
+            {/* Collapsible cron-job.org Setup Guide */}
             <div className="pt-1">
               <button
                 type="button"
@@ -379,22 +379,24 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
                 className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 transition-colors"
               >
                 <Info size={12} />
-                <span>Hướng dẫn cấu hình Vercel Cron & Upstash</span>
+                <span>Hướng dẫn thiết lập cron-job.org (Miễn phí & Tự động 24/7)</span>
                 {showVercelGuide ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               </button>
 
               {showVercelGuide && (
-                <div className="mt-2 p-3 bg-white rounded-xl border border-indigo-100 text-[11px] text-gray-700 space-y-2 leading-relaxed">
-                  <p className="font-bold text-gray-900">Để nhận thông báo bền vững 24/7 trên Vercel:</p>
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Ứng dụng đã cấu hình <strong>Vercel Cron</strong> tự động chạy mỗi phút (<code className="bg-gray-100 px-1 rounded font-mono">/api/cron</code>).</li>
-                    <li>Để lưu trữ danh sách thiết bị vĩnh viễn trên Serverless, tạo 1 database miễn phí tại <strong>Upstash Redis</strong> rồi thêm 2 biến vào Vercel:
-                      <div className="mt-1 bg-gray-50 p-1.5 rounded font-mono text-[10px] text-gray-800 space-y-0.5">
-                        <div>UPSTASH_REDIS_REST_URL=https://...</div>
-                        <div>UPSTASH_REDIS_REST_TOKEN=...</div>
+                <div className="mt-2 p-3 bg-white rounded-xl border border-indigo-100 text-[11px] text-gray-700 space-y-2.5 leading-relaxed">
+                  <p className="font-bold text-gray-900">Các bước thiết lập cron-job.org để nhận thông báo tự động:</p>
+                  <ol className="list-decimal pl-4 space-y-1.5">
+                    <li>Đăng ký tài khoản miễn phí tại <a href="https://cron-job.org" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">cron-job.org</a>.</li>
+                    <li>Tạo một <strong>Cronjob mới (Create Cronjob)</strong>:
+                      <div className="mt-1 bg-gray-50 p-2 rounded border border-gray-200 text-[11px] text-gray-800 space-y-1">
+                        <div><strong>Title:</strong> SmartSchedule Push Reminder</div>
+                        <div><strong>URL:</strong> <code className="bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded font-mono">{typeof window !== 'undefined' ? `${window.location.origin}/api/cron` : 'https://your-domain.vercel.app/api/cron'}</code></div>
+                        <div><strong>Execution schedule:</strong> Chọn <em>Every 1 minute</em> (hoặc <em>Every 5 minutes</em>)</div>
+                        <div><strong>Request Method:</strong> GET</div>
                       </div>
                     </li>
-                    <li>Khóa VAPID đã được tích hợp sẵn mặc định, hoặc bạn có thể chạy <code className="bg-gray-100 px-1 rounded font-mono">npm run generate:vapid</code> để tạo cặp khóa riêng.</li>
+                    <li>Bấm <strong>Create</strong>. Từ lúc này, cron-job.org sẽ tự động kích hoạt máy chủ kiểm tra và gửi thông báo đẩy đến điện thoại/máy tính của bạn đúng giờ mà không tốn phí!</li>
                   </ol>
                 </div>
               )}
