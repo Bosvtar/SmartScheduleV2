@@ -76,7 +76,18 @@ export const getPushStatus = async () => {
   }
 };
 
-export const subscribeToPush = async () => {
+const areUint8ArraysEqual = (a: Uint8Array | ArrayBuffer | null | undefined, b: Uint8Array | ArrayBuffer | null | undefined) => {
+  if (!a || !b) return false;
+  const arrA = a instanceof Uint8Array ? a : new Uint8Array(a);
+  const arrB = b instanceof Uint8Array ? b : new Uint8Array(b);
+  if (arrA.length !== arrB.length) return false;
+  for (let i = 0; i < arrA.length; i++) {
+    if (arrA[i] !== arrB[i]) return false;
+  }
+  return true;
+};
+
+export const subscribeToPush = async (forceResubscribe = false) => {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     throw new Error('Trình duyệt của bạn không hỗ trợ Web Push.');
   }
@@ -102,13 +113,28 @@ export const subscribeToPush = async () => {
   let existing = await reg.pushManager.getSubscription();
 
   if (existing) {
-    return existing;
+    const currentKey = existing.options?.applicationServerKey;
+    const isMatching = currentKey ? areUint8ArraysEqual(currentKey, appServerKey) : false;
+
+    if (forceResubscribe || !isMatching) {
+      console.log('Hủy đăng ký cũ và tạo Push Subscription mới với VAPID key hiện tại...');
+      try {
+        await existing.unsubscribe();
+      } catch (e) {
+        console.warn('Lỗi khi hủy đăng ký cũ:', e);
+      }
+      existing = null;
+    }
   }
 
-  return reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: appServerKey,
-  });
+  if (!existing) {
+    existing = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: appServerKey,
+    });
+  }
+
+  return existing;
 };
 
 export const syncPushState = async (schedules: ScheduleItem[], settings: NotificationSettings) => {
@@ -116,7 +142,10 @@ export const syncPushState = async (schedules: ScheduleItem[], settings: Notific
     return { skipped: true, reason: 'Chưa cấp quyền thông báo' };
   }
   const reg = await ensureServiceWorker();
-  const sub = await reg.pushManager.getSubscription();
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await subscribeToPush();
+  }
   if (!sub) return { skipped: true, reason: 'Chưa đăng ký Push' };
 
   const response = await fetch('/api/push-sync', {
@@ -139,9 +168,13 @@ export const syncPushState = async (schedules: ScheduleItem[], settings: Notific
   return response.json();
 };
 
-export const sendServerPushTest = async () => {
+export const sendServerPushTest = async (retryOnAuthError = true): Promise<any> => {
   const reg = await ensureServiceWorker();
-  const sub = await reg.pushManager.getSubscription();
+  let sub = await reg.pushManager.getSubscription();
+
+  if (!sub) {
+    sub = await subscribeToPush(true);
+  }
 
   const response = await fetch('/api/push-test', {
     method: 'POST',
@@ -153,11 +186,32 @@ export const sendServerPushTest = async () => {
   });
 
   const data = await response.json().catch(() => ({}));
+  
+  // Nếu khóa VAPID lệch (401/403) hoặc đăng ký hết hạn (410/404), tự động re-subscribe và thử lại 1 lần
   if (!response.ok) {
+    const status = response.status;
+    if (retryOnAuthError && (status === 401 || status === 403 || status === 404 || status === 410 || status === 400)) {
+      console.warn(`Push test trả về mã ${status}, đang tạo lại subscription mới và thử lại...`);
+      const newSub = await subscribeToPush(true);
+      const retryRes = await fetch('/api/push-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: getDeviceId(),
+          subscription: newSub ? newSub.toJSON() : undefined,
+        }),
+      });
+      const retryData = await retryRes.json().catch(() => ({}));
+      if (!retryRes.ok) {
+        throw new Error(retryData.error || 'Web Push server không gửi được');
+      }
+      return retryData;
+    }
     throw new Error(data.error || 'Không thể gửi thông báo thử từ máy chủ');
   }
   return data;
 };
+
 
 export const triggerManualCronCheck = async () => {
   const response = await fetch('/api/cron', {

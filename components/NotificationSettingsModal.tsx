@@ -123,17 +123,24 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     }
   };
 
-  const handleEnablePush = async () => {
+  const handleEnablePush = async (force = false) => {
     setPushBusy(true);
     setPushMessage(null);
     try {
-      await subscribeToPush();
+      await subscribeToPush(force);
       const next = { ...formData, enabled: true };
       setFormData(next);
-      await syncPushState(getSchedules(), next);
+      const res = await syncPushState(getSchedules(), next);
       setPushSubscribed(true);
       setPermissionStatus('granted');
-      setPushMessage({ text: 'Đã kết nối Web Push & đồng bộ lịch thành công!', type: 'success' });
+      if (res?.upstashConnected === false) {
+        setPushMessage({
+          text: 'Đã kết nối Web Push thành công! (Dữ liệu đã đồng bộ lên server).',
+          type: 'info'
+        });
+      } else {
+        setPushMessage({ text: 'Đã kết nối Web Push & đồng bộ lịch thành công!', type: 'success' });
+      }
     } catch (error: any) {
       setPushMessage({ text: error?.message || 'Không thể bật Web Push', type: 'error' });
     } finally {
@@ -145,23 +152,22 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setPushBusy(true);
     setPushMessage(null);
     try {
-      if (!pushSubscribed) {
-        await subscribeToPush();
-        setPushSubscribed(true);
-      }
+      await subscribeToPush(false);
+      setPushSubscribed(true);
       await syncPushState(getSchedules(), { ...formData, enabled: true });
-      await sendServerPushTest();
+      await sendServerPushTest(true);
       setTestSent(true);
-      setPushMessage({ text: 'Máy chủ đã gửi thông báo thử thành công!', type: 'success' });
-      setTimeout(() => setTestSent(false), 3500);
+      setPushMessage({ text: 'Máy chủ Web Push đã gửi thông báo thành công tới thiết bị của bạn!', type: 'success' });
+      setTimeout(() => setTestSent(false), 4000);
     } catch (error: any) {
+      console.error('Test push error:', error);
       dispatchNotification(
         '🔔 SmartSchedule - Thông báo thử',
-        'Thông báo cục bộ đang hoạt động. Web Push server trả lời: ' + (error?.message || ''),
+        'Web Push server phản hồi: ' + (error?.message || ''),
         { ...formData, enabled: true }
       );
       setPushMessage({
-        text: `${error?.message || 'Web Push lỗi'}. Đã kích hoạt thông báo cục bộ thay thế.`,
+        text: `Lỗi Web Push: ${error?.message || 'Không gửi được'}.`,
         type: 'error'
       });
     } finally {

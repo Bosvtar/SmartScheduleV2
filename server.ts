@@ -322,7 +322,12 @@ async function startServer() {
       };
       await redis.set(deviceKey(deviceId), device);
       await redis.sadd(deviceSetKey, deviceId);
-      return res.status(200).json({ ok: true, deviceId, scheduleCount: device.schedules.length });
+      return res.status(200).json({
+        ok: true,
+        deviceId,
+        scheduleCount: device.schedules.length,
+        upstashConnected: isUpstashConfigured()
+      });
     } catch (error: any) {
       console.error("push-sync error", error);
       return res.status(500).json({ error: error?.message || "Không thể đồng bộ Push" });
@@ -343,20 +348,23 @@ async function startServer() {
       }
 
       if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
-        return res.status(404).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật Web Push trước." });
+        return res.status(400).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật Web Push trước." });
       }
 
       await sendPush(targetSub, {
         title: "🔔 SmartSchedule - Thông báo thử",
-        body: "Nếu bạn nhìn thấy thông báo này thì Web Push đang hoạt động rất tốt!",
+        body: "Chúc mừng! Web Push đang hoạt động rất tốt.",
         url: "/",
       });
       return res.status(200).json({ ok: true });
     } catch (error: any) {
-      const status = error?.statusCode || error?.status;
+      const status = error?.statusCode || error?.status || 500;
       console.error("push-test error", error);
-      return res.status(status === 410 || status === 404 ? 410 : 500).json({
-        error: error?.body || error?.message || "Không thể gửi Push thử",
+      const bodyMsg = typeof error?.body === "string" ? error.body : (error?.message || "Không thể gửi Push thử");
+      return res.status(status).json({
+        error: `Web Push lỗi (${status}): ${bodyMsg}`,
+        statusCode: status,
+        details: error?.body || error?.message
       });
     }
   });
