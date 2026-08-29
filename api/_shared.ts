@@ -1,7 +1,23 @@
 import { Redis } from "@upstash/redis";
-import webpushImport from "web-push";
+import { createRequire } from "module";
 
-const webpush = (webpushImport as any).default || webpushImport;
+// Safe require for CommonJS packages in Node ESM
+let webpushLib: any = null;
+function getWebPush() {
+  if (webpushLib) return webpushLib;
+  try {
+    const require = createRequire(import.meta.url);
+    webpushLib = require("web-push");
+  } catch {
+    try {
+      // Fallback
+      webpushLib = (globalThis as any).webpush;
+    } catch {
+      webpushLib = null;
+    }
+  }
+  return webpushLib;
+}
 
 // In-memory fallback if Upstash credentials are not configured
 const memoryStore = new Map<string, any>();
@@ -14,7 +30,7 @@ const rawToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 if (rawUrl && rawToken && typeof rawUrl === "string" && typeof rawToken === "string") {
   const cleanUrl = rawUrl.trim();
   const cleanToken = rawToken.trim();
-  if (cleanUrl.startsWith("http")) {
+  if (cleanUrl.startsWith("http") && !cleanUrl.includes("your-") && !cleanToken.includes("your-")) {
     try {
       upstashClient = new Redis({
         url: cleanUrl,
@@ -115,7 +131,7 @@ const DEFAULT_VAPID_SUBJECT = "mailto:smartschedule@app.internal";
 function isValidBase64Key(key: string | undefined, minLen = 30): boolean {
   if (!key || typeof key !== "string") return false;
   const trimmed = key.trim();
-  if (trimmed.includes("your_") || trimmed.includes("...") || trimmed.length < minLen) {
+  if (trimmed.includes("your_") || trimmed.includes("replace_") || trimmed.includes("...") || trimmed.length < minLen) {
     return false;
   }
   return true;
@@ -165,21 +181,6 @@ export const isCustomVapidConfigured = () => {
     isValidBase64Key(process.env.VAPID_PRIVATE_KEY, 30)
   );
 };
-
-// Lazy configure VAPID details safely
-function ensureVapidConfigured() {
-  const pub = getVapidPublicKey();
-  const priv = getVapidPrivateKey();
-  const sub = getVapidSubject();
-  if (pub && priv && sub) {
-    try {
-      webpush.setVapidDetails(sub, pub, priv);
-    } catch (e) {
-      console.warn("webpush.setVapidDetails error:", e);
-    }
-  }
-}
-ensureVapidConfigured();
 
 export type StoredDevice = {
   deviceId: string;
@@ -233,16 +234,21 @@ export function getVietnamNow(date = new Date()) {
 }
 
 export async function sendPush(subscription: PushSubscriptionJSON, payload: unknown) {
+  const wp = getWebPush();
+  if (!wp) {
+    throw new Error("Thư viện web-push chưa sẵn sàng trên môi trường này");
+  }
   const activePub = getVapidPublicKey();
   const activePriv = getVapidPrivateKey();
   const activeSub = getVapidSubject();
   if (!activePub || !activePriv) throw new Error("Thiếu VAPID_PUBLIC_KEY hoặc VAPID_PRIVATE_KEY");
   
   try {
-    webpush.setVapidDetails(activeSub, activePub, activePriv);
-  } catch {
-    // Ignore already configured
+    wp.setVapidDetails(activeSub, activePub, activePriv);
+  } catch (err: any) {
+    console.warn("setVapidDetails warning:", err?.message || err);
   }
   
-  return webpush.sendNotification(subscription as any, JSON.stringify(payload), { TTL: 120 });
+  return wp.sendNotification(subscription as any, JSON.stringify(payload), { TTL: 120 });
 }
+
