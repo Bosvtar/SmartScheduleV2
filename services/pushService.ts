@@ -53,7 +53,7 @@ export const fetchPushConfig = async (): Promise<PushBackendConfig> => {
   }
 
   const envKey = (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY;
-  const fallbackKey = envKey || 'BGZJFjvBlHSH2SfRq-qiyogY60cs8SCkB7Oexh9tvobOJjTXWf0tdlv23BD6S0dKj65ir-WJsB8zrbdREg8Rk10';
+  const fallbackKey = envKey || 'BEgl5nFnHZId0neRHh_opBKRNuOWO-bST34Dv5dNY9kPtjkxS6Tr0RNe5EHlhiuyTQ1U_jZCpEBprwjvnH-cG34';
   cachedVapidPublicKey = fallbackKey;
 
   return {

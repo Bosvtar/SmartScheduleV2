@@ -384,8 +384,9 @@ async function startServer() {
 
   // Cron endpoint
   const cronHandler = async (req: express.Request, res: express.Response) => {
-    const secret = process.env.CRON_SECRET;
-    if (secret && req.headers["x-vercel-cron"] !== "1") {
+    const secret = (process.env.CRON_SECRET || "").trim();
+    const isPlaceholderSecret = !secret || secret.startsWith("replace_with") || secret.startsWith("your_") || secret.length < 8;
+    if (!isPlaceholderSecret && req.headers["x-vercel-cron"] !== "1") {
       const auth = req.headers.authorization || "";
       const supplied = req.query.secret;
       if (auth !== `Bearer ${secret}` && supplied !== secret) {

@@ -1,16 +1,29 @@
 import { Redis } from "@upstash/redis";
-import webpush from "web-push";
+import webpushImport from "web-push";
+
+const webpush = (webpushImport as any).default || webpushImport;
 
 // In-memory fallback if Upstash credentials are not configured
 const memoryStore = new Map<string, any>();
 const memorySets = new Map<string, Set<string>>();
 
 let upstashClient: Redis | null = null;
-if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-  try {
-    upstashClient = Redis.fromEnv();
-  } catch (e) {
-    console.warn("Failed to initialize Upstash Redis from env, using memory store:", e);
+const rawUrl = process.env.UPSTASH_REDIS_REST_URL;
+const rawToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+if (rawUrl && rawToken && typeof rawUrl === "string" && typeof rawToken === "string") {
+  const cleanUrl = rawUrl.trim();
+  const cleanToken = rawToken.trim();
+  if (cleanUrl.startsWith("http")) {
+    try {
+      upstashClient = new Redis({
+        url: cleanUrl,
+        token: cleanToken,
+      });
+    } catch (e) {
+      console.warn("Failed to initialize Upstash Redis from env, using memory store:", e);
+      upstashClient = null;
+    }
   }
 }
 
@@ -18,7 +31,8 @@ export const redis = {
   get: async <T = any>(key: string): Promise<T | null> => {
     if (upstashClient) {
       try {
-        return await upstashClient.get<T>(key);
+        const res = await upstashClient.get<T>(key);
+        return res !== undefined ? res : null;
       } catch (err) {
         console.warn("Upstash Redis get error, fallback to memory:", err);
       }
@@ -83,7 +97,8 @@ export const redis = {
   smembers: async <T = string>(key: string): Promise<T[]> => {
     if (upstashClient) {
       try {
-        return await upstashClient.smembers(key);
+        const res = await upstashClient.smembers(key);
+        return Array.isArray(res) ? (res as unknown as T[]) : [];
       } catch (err) {
         console.warn("Upstash Redis smembers error, fallback to memory:", err);
       }
@@ -93,39 +108,78 @@ export const redis = {
   },
 };
 
-const DEFAULT_VAPID_PUBLIC_KEY = "BGZJFjvBlHSH2SfRq-qiyogY60cs8SCkB7Oexh9tvobOJjTXWf0tdlv23BD6S0dKj65ir-WJsB8zrbdREg8Rk10";
-const DEFAULT_VAPID_PRIVATE_KEY = "xVu3JsMpIxue27zFcz8nwIg7WCSyEGYyYjcHBZqL6k4";
+const DEFAULT_VAPID_PUBLIC_KEY = "BEgl5nFnHZId0neRHh_opBKRNuOWO-bST34Dv5dNY9kPtjkxS6Tr0RNe5EHlhiuyTQ1U_jZCpEBprwjvnH-cG34";
+const DEFAULT_VAPID_PRIVATE_KEY = "E80fL0wqI0kzSNqMK_Xh6n-QawObczy1xzo3h20hvvw";
 const DEFAULT_VAPID_SUBJECT = "mailto:smartschedule@app.internal";
 
+function isValidBase64Key(key: string | undefined, minLen = 30): boolean {
+  if (!key || typeof key !== "string") return false;
+  const trimmed = key.trim();
+  if (trimmed.includes("your_") || trimmed.includes("...") || trimmed.length < minLen) {
+    return false;
+  }
+  return true;
+}
+
 export const getVapidPublicKey = () => {
-  return process.env.VITE_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY;
+  const envPub = process.env.VITE_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY;
+  if (isValidBase64Key(envPub, 60)) {
+    return envPub!.trim();
+  }
+  return DEFAULT_VAPID_PUBLIC_KEY;
 };
 
 export const getVapidPrivateKey = () => {
-  return process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE_KEY;
+  const envPriv = process.env.VAPID_PRIVATE_KEY;
+  if (isValidBase64Key(envPriv, 30)) {
+    return envPriv!.trim();
+  }
+  return DEFAULT_VAPID_PRIVATE_KEY;
 };
 
 export const getVapidSubject = () => {
-  return process.env.VAPID_SUBJECT || DEFAULT_VAPID_SUBJECT;
+  const envSub = process.env.VAPID_SUBJECT;
+  if (envSub && envSub.includes("@") && !envSub.includes("your_")) {
+    return envSub.trim();
+  }
+  return DEFAULT_VAPID_SUBJECT;
 };
 
 export const isUpstashConfigured = () => {
-  return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  return Boolean(
+    url &&
+    token &&
+    typeof url === "string" &&
+    typeof token === "string" &&
+    url.startsWith("http") &&
+    !url.includes("your-") &&
+    !token.includes("your-")
+  );
 };
 
 export const isCustomVapidConfigured = () => {
-  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+  return Boolean(
+    isValidBase64Key(process.env.VAPID_PUBLIC_KEY, 60) &&
+    isValidBase64Key(process.env.VAPID_PRIVATE_KEY, 30)
+  );
 };
 
-const publicKey = getVapidPublicKey();
-const privateKey = getVapidPrivateKey();
-const subject = getVapidSubject();
-
-try {
-  webpush.setVapidDetails(subject, publicKey, privateKey);
-} catch (e) {
-  console.warn("Failed to set VAPID details:", e);
+// Lazy configure VAPID details safely
+function ensureVapidConfigured() {
+  const pub = getVapidPublicKey();
+  const priv = getVapidPrivateKey();
+  const sub = getVapidSubject();
+  if (pub && priv && sub) {
+    try {
+      webpush.setVapidDetails(sub, pub, priv);
+    } catch (e) {
+      console.warn("webpush.setVapidDetails error:", e);
+    }
+  }
 }
+ensureVapidConfigured();
 
 export type StoredDevice = {
   deviceId: string;
@@ -146,26 +200,36 @@ export const deviceKey = (id: string) => `smartschedule:device:${id}`;
 export const deviceSetKey = "smartschedule:devices";
 
 export function getVietnamNow(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-    weekday: "long",
-  }).formatToParts(date);
-  const pick = (type: string) => parts.find(p => p.type === type)?.value || "";
-  const year = pick("year"), month = pick("month"), day = pick("day");
-  const hour = pick("hour"), minute = pick("minute"), second = pick("second");
-  const weekdayEn = pick("weekday").toLowerCase();
-  const dayMap: Record<string,string> = {
-    monday: "Thứ 2", tuesday: "Thứ 3", wednesday: "Thứ 4", thursday: "Thứ 5",
-    friday: "Thứ 6", saturday: "Thứ 7", sunday: "Chủ Nhật"
-  };
-  return {
-    dateStr: `${day}/${month}/${year}`,
-    timeStr: `${hour}:${minute}`,
-    totalMinutes: Number(hour) * 60 + Number(minute),
-    dayOfWeek: dayMap[weekdayEn] || "",
-  };
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      weekday: "long",
+    }).formatToParts(date);
+    const pick = (type: string) => parts.find(p => p.type === type)?.value || "";
+    const year = pick("year"), month = pick("month"), day = pick("day");
+    const hour = pick("hour"), minute = pick("minute"), second = pick("second");
+    const weekdayEn = pick("weekday").toLowerCase();
+    const dayMap: Record<string,string> = {
+      monday: "Thứ 2", tuesday: "Thứ 3", wednesday: "Thứ 4", thursday: "Thứ 5",
+      friday: "Thứ 6", saturday: "Thứ 7", sunday: "Chủ Nhật"
+    };
+    return {
+      dateStr: `${day}/${month}/${year}`,
+      timeStr: `${hour}:${minute}`,
+      totalMinutes: Number(hour) * 60 + Number(minute),
+      dayOfWeek: dayMap[weekdayEn] || "",
+    };
+  } catch {
+    const d = new Date();
+    return {
+      dateStr: `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`,
+      timeStr: `${d.getHours()}:${d.getMinutes()}`,
+      totalMinutes: d.getHours() * 60 + d.getMinutes(),
+      dayOfWeek: "Thứ 2",
+    };
+  }
 }
 
 export async function sendPush(subscription: PushSubscriptionJSON, payload: unknown) {
@@ -176,8 +240,8 @@ export async function sendPush(subscription: PushSubscriptionJSON, payload: unkn
   
   try {
     webpush.setVapidDetails(activeSub, activePub, activePriv);
-  } catch (e) {
-    // Ignore if already set
+  } catch {
+    // Ignore already configured
   }
   
   return webpush.sendNotification(subscription as any, JSON.stringify(payload), { TTL: 120 });

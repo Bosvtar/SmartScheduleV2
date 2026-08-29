@@ -2,11 +2,13 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { redis, deviceKey, deviceSetKey, getVietnamNow, sendPush, type StoredDevice } from "./_shared";
 
 function authorized(req: VercelRequest) {
-  const secret = process.env.CRON_SECRET;
+  const secret = (process.env.CRON_SECRET || "").trim();
   // If Vercel Cron triggered, it automatically includes x-vercel-cron: "1"
   if (req.headers["x-vercel-cron"] === "1") return true;
-  // If no secret configured yet, allow execution for ease of setup/test
-  if (!secret) return true;
+  // If no secret configured or is placeholder, allow execution for cron-job.org
+  if (!secret || secret.startsWith("replace_with") || secret.startsWith("your_") || secret.length < 8) {
+    return true;
+  }
   const auth = req.headers.authorization || "";
   const supplied = Array.isArray(req.query.secret) ? req.query.secret[0] : req.query.secret;
   return auth === `Bearer ${secret}` || supplied === secret;
