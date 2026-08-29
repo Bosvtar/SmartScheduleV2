@@ -249,6 +249,10 @@ export async function sendPush(subscription: PushSubscriptionJSON, payload: unkn
     console.warn("setVapidDetails warning:", err?.message || err);
   }
   
-  return wp.sendNotification(subscription as any, JSON.stringify(payload), { TTL: 120 });
+  return wp.sendNotification(subscription as any, JSON.stringify(payload), {
+    TTL: 86400,
+    urgency: "high",
+    topic: "smartschedule-reminder"
+  });
 }
 

@@ -1,4 +1,4 @@
-const CACHE = 'smartschedule-v4-webpush';
+const CACHE = 'smartschedule-v5-webpush';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -45,21 +45,41 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let data = { title: 'SmartSchedule AI', body: 'Bạn có một nhắc lịch mới.' };
+  let data = { 
+    title: 'SmartSchedule AI', 
+    body: 'Bạn có một nhắc lịch mới.',
+    tag: `smartschedule-${Date.now()}`,
+    url: '/'
+  };
+  
   try {
-    data = { ...data, ...(event.data ? event.data.json() : {}) };
-  } catch {}
+    if (event.data) {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    }
+  } catch (err) {
+    if (event.data) {
+      data.body = event.data.text();
+    }
+  }
+
+  const notificationOptions = {
+    body: data.body,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || `reminder-${Date.now()}`,
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    vibrate: data.vibrate || [300, 100, 300, 100, 400],
+    data: {
+      url: data.url || '/',
+      timestamp: Date.now()
+    }
+  };
 
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      tag: data.tag || 'smartschedule-reminder',
-      renotify: true,
-      vibrate: data.vibrate || [200, 100, 200],
-      data: data.url ? { url: data.url } : undefined,
-    })
+    self.registration.showNotification(data.title, notificationOptions)
   );
 });
 

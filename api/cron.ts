@@ -164,7 +164,11 @@ async function sendPushNotification(subscription: any, payload: any) {
   } catch (e) {
     console.warn("setVapidDetails warning:", e);
   }
-  return wp.sendNotification(subscription, JSON.stringify(payload), { TTL: 120 });
+  return wp.sendNotification(subscription, JSON.stringify(payload), {
+    TTL: 86400,
+    urgency: "high",
+    topic: "smartschedule-reminder"
+  });
 }
 
 function normalizeDayOfWeek(day: string): string {

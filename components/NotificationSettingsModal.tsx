@@ -513,6 +513,16 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               </button>
             </div>
 
+            {/* Background Notification Note for Mobile Lockscreen */}
+            <div className="p-2.5 bg-white/80 border border-indigo-100 rounded-xl text-[11px] text-gray-600 space-y-1">
+              <span className="font-bold text-indigo-900 block flex items-center gap-1">
+                💡 Lưu ý khi tắt màn hình điện thoại:
+              </span>
+              <p className="leading-relaxed">
+                Để nhận thông báo khi điện thoại tắt màn hình: Bấm <strong>"Bật Web Push"</strong> ở trên, cho phép quyền thông báo trên trình duyệt (Chrome/Safari) và thêm ứng dụng vào Màn hình chính (PWA). Đảm bảo không bật chế độ tiết kiệm pin nghiêm ngặt cho trình duyệt.
+              </p>
+            </div>
+
             {cronResult && (
               <div className="p-2 bg-white/90 border border-indigo-100 rounded-xl text-[11px] text-indigo-900 font-mono">
                 {cronResult}
