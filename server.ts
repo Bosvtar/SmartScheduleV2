@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import { redis, deviceKey, deviceSetKey, sendPush, getVietnamNow, type StoredDevice } from "./api/_shared";
 
 async function startServer() {
   const app = express();
@@ -283,6 +284,134 @@ async function startServer() {
       return res.status(500).json({ error: message });
     }
   });
+
+  // Push Sync endpoint
+  app.post("/api/push-sync", async (req, res) => {
+    try {
+      const { deviceId, subscription, schedules, settings, timezone } = req.body || {};
+      if (!deviceId || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+        return res.status(400).json({ error: "Thiếu deviceId hoặc Push subscription hợp lệ" });
+      }
+      const device: StoredDevice = {
+        deviceId,
+        subscription,
+        schedules: Array.isArray(schedules) ? schedules : [],
+        settings: settings || {},
+        timezone: timezone || "Asia/Ho_Chi_Minh",
+        updatedAt: new Date().toISOString(),
+      };
+      await redis.set(deviceKey(deviceId), device);
+      await redis.sadd(deviceSetKey, deviceId);
+      return res.status(200).json({ ok: true, deviceId, scheduleCount: device.schedules.length });
+    } catch (error: any) {
+      console.error("push-sync error", error);
+      return res.status(500).json({ error: error?.message || "Không thể đồng bộ Push" });
+    }
+  });
+
+  // Push Test endpoint
+  app.post("/api/push-test", async (req, res) => {
+    try {
+      const { deviceId } = req.body || {};
+      if (!deviceId) return res.status(400).json({ error: "Thiếu deviceId" });
+      const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+      if (!device) return res.status(404).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật thông báo trước." });
+      await sendPush(device.subscription, {
+        title: "🔔 SmartSchedule - Thông báo thử",
+        body: "Nếu bạn nhìn thấy thông báo này thì Web Push đang hoạt động.",
+        url: "/",
+      });
+      return res.status(200).json({ ok: true });
+    } catch (error: any) {
+      const status = error?.statusCode || error?.status;
+      console.error("push-test error", error);
+      return res.status(status === 410 || status === 404 ? 410 : 500).json({
+        error: error?.body || error?.message || "Không thể gửi Push thử",
+      });
+    }
+  });
+
+  // Push Unsubscribe endpoint
+  app.post("/api/push-unsubscribe", async (req, res) => {
+    try {
+      const { deviceId } = req.body || {};
+      if (!deviceId) return res.status(400).json({ error: "Thiếu deviceId" });
+      await redis.del(deviceKey(deviceId));
+      await redis.srem(deviceSetKey, deviceId);
+      return res.status(200).json({ ok: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Không thể hủy Push" });
+    }
+  });
+
+  // Cron endpoint
+  const cronHandler = async (req: express.Request, res: express.Response) => {
+    const secret = process.env.CRON_SECRET;
+    if (secret) {
+      const auth = req.headers.authorization || "";
+      const supplied = req.query.secret;
+      if (auth !== `Bearer ${secret}` && supplied !== secret) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    const now = getVietnamNow();
+    let checked = 0, sent = 0, errors = 0;
+    try {
+      const ids = await redis.smembers<string>(deviceSetKey);
+      for (const deviceId of ids || []) {
+        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        if (!device?.subscription) {
+          await redis.srem(deviceSetKey, deviceId);
+          continue;
+        }
+        checked++;
+        const settings = device.settings || {};
+        if (!settings.enabled) continue;
+        const due: { key: string; title: string; body: string }[] = [];
+        for (const item of device.schedules || []) {
+          const isToday = item.date ? item.date === now.dateStr : item.dayOfWeek === now.dayOfWeek;
+          if (!isToday) continue;
+          const [h, m] = String(item.startTime || "").split(":").map(Number);
+          const start = Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN;
+          for (const offset of (settings.notifyMinutesBefore || [15])) {
+            const target = start - Number(offset);
+            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes < target + 2) {
+              due.push({
+                key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
+                title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
+                body: `${item.className ? `Lớp ${item.className}` : "Buổi dạy"}${item.location ? ` • ${item.location}` : ""} • Bắt đầu lúc ${item.startTime} (${offset} phút nữa)${item.lessonName ? ` • ${item.lessonName}` : ""}`,
+              });
+            }
+          }
+        }
+        for (const job of due) {
+          const claimed = await redis.set(job.key, "1", { nx: true, ex: 172800 });
+          if (!claimed) continue;
+          try {
+            await sendPush(device.subscription, { title: job.title, body: job.body, url: "/" });
+            sent++;
+          } catch (error: any) {
+            errors++;
+            await redis.del(job.key);
+            const code = error?.statusCode || error?.status;
+            if (code === 404 || code === 410) {
+              await redis.del(deviceKey(deviceId));
+              await redis.srem(deviceSetKey, deviceId);
+              break;
+            }
+            console.error("push send error", deviceId, error?.message || error);
+          }
+        }
+      }
+      return res.status(200).json({ ok: true, now, checked, sent, errors });
+    } catch (error: any) {
+      console.error("cron error", error);
+      return res.status(500).json({ error: error?.message || "Cron failed", checked, sent, errors });
+    }
+  };
+
+  app.get("/api/cron", cronHandler);
+  app.post("/api/cron", cronHandler);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

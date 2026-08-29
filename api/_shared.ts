@@ -1,14 +1,108 @@
 import { Redis } from "@upstash/redis";
 import webpush from "web-push";
 
-export const redis = Redis.fromEnv();
+// In-memory fallback if Upstash credentials are not configured
+const memoryStore = new Map<string, any>();
+const memorySets = new Map<string, Set<string>>();
+
+let upstashClient: Redis | null = null;
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    upstashClient = Redis.fromEnv();
+  } catch (e) {
+    console.warn("Failed to initialize Upstash Redis from env, using memory store:", e);
+  }
+}
+
+export const redis = {
+  get: async <T = any>(key: string): Promise<T | null> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.get<T>(key);
+      } catch (err) {
+        console.warn("Upstash Redis get error, fallback to memory:", err);
+      }
+    }
+    const val = memoryStore.get(key);
+    return (val !== undefined ? val : null) as T | null;
+  },
+  set: async (key: string, value: any, options?: { nx?: boolean; ex?: number }): Promise<any> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.set(key, value, options);
+      } catch (err) {
+        console.warn("Upstash Redis set error, fallback to memory:", err);
+      }
+    }
+    if (options?.nx && memoryStore.has(key)) {
+      return null;
+    }
+    memoryStore.set(key, value);
+    return "OK";
+  },
+  del: async (key: string): Promise<number> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.del(key);
+      } catch (err) {
+        console.warn("Upstash Redis del error, fallback to memory:", err);
+      }
+    }
+    const existed = memoryStore.delete(key);
+    return existed ? 1 : 0;
+  },
+  sadd: async (key: string, member: string): Promise<number> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.sadd(key, member);
+      } catch (err) {
+        console.warn("Upstash Redis sadd error, fallback to memory:", err);
+      }
+    }
+    if (!memorySets.has(key)) {
+      memorySets.set(key, new Set());
+    }
+    const set = memorySets.get(key)!;
+    const sizeBefore = set.size;
+    set.add(member);
+    return set.size - sizeBefore;
+  },
+  srem: async (key: string, member: string): Promise<number> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.srem(key, member);
+      } catch (err) {
+        console.warn("Upstash Redis srem error, fallback to memory:", err);
+      }
+    }
+    const set = memorySets.get(key);
+    if (!set) return 0;
+    const deleted = set.delete(member);
+    return deleted ? 1 : 0;
+  },
+  smembers: async <T = string>(key: string): Promise<T[]> => {
+    if (upstashClient) {
+      try {
+        return await upstashClient.smembers(key);
+      } catch (err) {
+        console.warn("Upstash Redis smembers error, fallback to memory:", err);
+      }
+    }
+    const set = memorySets.get(key);
+    return set ? (Array.from(set) as unknown as T[]) : [];
+  },
+};
 
 const publicKey = process.env.VAPID_PUBLIC_KEY;
 const privateKey = process.env.VAPID_PRIVATE_KEY;
 const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
 
 if (publicKey && privateKey) {
-  webpush.setVapidDetails(subject, publicKey, privateKey);
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+  } catch (e) {
+    console.warn("Failed to set VAPID details:", e);
+  }
 }
 
 export type StoredDevice = {

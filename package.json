@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-  "dev": "tsx server.ts",
-  "build": "npx vite build",
-  "start": "vite preview",
-  "preview": "vite preview",
-  "generate:vapid": "tsx scripts/generate-vapid.ts"
-},
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "preview": "vite preview",
+    "generate:vapid": "tsx scripts/generate-vapid.ts"
+  },
   "dependencies": {
     "@google/genai": "^1.30.0",
     "esbuild": "^0.28.2",
