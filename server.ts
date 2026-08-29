@@ -2,7 +2,17 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import { redis, deviceKey, deviceSetKey, sendPush, getVietnamNow, type StoredDevice } from "./api/_shared";
+import {
+  redis,
+  deviceKey,
+  deviceSetKey,
+  sendPush,
+  getVietnamNow,
+  getVapidPublicKey,
+  isUpstashConfigured,
+  isCustomVapidConfigured,
+  type StoredDevice
+} from "./api/_shared";
 
 async function startServer() {
   const app = express();
@@ -285,6 +295,16 @@ async function startServer() {
     }
   });
 
+  // Push Config endpoint
+  app.get("/api/push-config", (req, res) => {
+    return res.json({
+      publicKey: getVapidPublicKey(),
+      isUpstashConfigured: isUpstashConfigured(),
+      isCustomVapidConfigured: isCustomVapidConfigured(),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Push Sync endpoint
   app.post("/api/push-sync", async (req, res) => {
     try {
@@ -312,13 +332,23 @@ async function startServer() {
   // Push Test endpoint
   app.post("/api/push-test", async (req, res) => {
     try {
-      const { deviceId } = req.body || {};
-      if (!deviceId) return res.status(400).json({ error: "Thiếu deviceId" });
-      const device = await redis.get<StoredDevice>(deviceKey(deviceId));
-      if (!device) return res.status(404).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật thông báo trước." });
-      await sendPush(device.subscription, {
+      const { deviceId, subscription } = req.body || {};
+      let targetSub = subscription;
+
+      if (!targetSub && deviceId) {
+        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        if (device?.subscription) {
+          targetSub = device.subscription;
+        }
+      }
+
+      if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
+        return res.status(404).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật Web Push trước." });
+      }
+
+      await sendPush(targetSub, {
         title: "🔔 SmartSchedule - Thông báo thử",
-        body: "Nếu bạn nhìn thấy thông báo này thì Web Push đang hoạt động.",
+        body: "Nếu bạn nhìn thấy thông báo này thì Web Push đang hoạt động rất tốt!",
         url: "/",
       });
       return res.status(200).json({ ok: true });
@@ -347,7 +377,7 @@ async function startServer() {
   // Cron endpoint
   const cronHandler = async (req: express.Request, res: express.Response) => {
     const secret = process.env.CRON_SECRET;
-    if (secret) {
+    if (secret && req.headers["x-vercel-cron"] !== "1") {
       const auth = req.headers.authorization || "";
       const supplied = req.query.secret;
       if (auth !== `Bearer ${secret}` && supplied !== secret) {
@@ -375,7 +405,7 @@ async function startServer() {
           const start = Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN;
           for (const offset of (settings.notifyMinutesBefore || [15])) {
             const target = start - Number(offset);
-            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes < target + 2) {
+            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
               due.push({
                 key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
                 title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,

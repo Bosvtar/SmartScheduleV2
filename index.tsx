@@ -13,9 +13,9 @@ root.render(
     <App />
   </React.StrictMode>
 );
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
       console.warn('Không thể đăng ký Service Worker:', error);
     });
   });

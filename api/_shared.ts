@@ -93,16 +93,38 @@ export const redis = {
   },
 };
 
-const publicKey = process.env.VAPID_PUBLIC_KEY;
-const privateKey = process.env.VAPID_PRIVATE_KEY;
-const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
+const DEFAULT_VAPID_PUBLIC_KEY = "BGZJFjvBlHSH2SfRq-qiyogY60cs8SCkB7Oexh9tvobOJjTXWf0tdlv23BD6S0dKj65ir-WJsB8zrbdREg8Rk10";
+const DEFAULT_VAPID_PRIVATE_KEY = "xVu3JsMpIxue27zFcz8nwIg7WCSyEGYyYjcHBZqL6k4";
+const DEFAULT_VAPID_SUBJECT = "mailto:smartschedule@app.internal";
 
-if (publicKey && privateKey) {
-  try {
-    webpush.setVapidDetails(subject, publicKey, privateKey);
-  } catch (e) {
-    console.warn("Failed to set VAPID details:", e);
-  }
+export const getVapidPublicKey = () => {
+  return process.env.VITE_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || DEFAULT_VAPID_PUBLIC_KEY;
+};
+
+export const getVapidPrivateKey = () => {
+  return process.env.VAPID_PRIVATE_KEY || DEFAULT_VAPID_PRIVATE_KEY;
+};
+
+export const getVapidSubject = () => {
+  return process.env.VAPID_SUBJECT || DEFAULT_VAPID_SUBJECT;
+};
+
+export const isUpstashConfigured = () => {
+  return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+};
+
+export const isCustomVapidConfigured = () => {
+  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+};
+
+const publicKey = getVapidPublicKey();
+const privateKey = getVapidPrivateKey();
+const subject = getVapidSubject();
+
+try {
+  webpush.setVapidDetails(subject, publicKey, privateKey);
+} catch (e) {
+  console.warn("Failed to set VAPID details:", e);
 }
 
 export type StoredDevice = {
@@ -147,6 +169,16 @@ export function getVietnamNow(date = new Date()) {
 }
 
 export async function sendPush(subscription: PushSubscriptionJSON, payload: unknown) {
-  if (!publicKey || !privateKey) throw new Error("Thiếu VAPID_PUBLIC_KEY hoặc VAPID_PRIVATE_KEY");
+  const activePub = getVapidPublicKey();
+  const activePriv = getVapidPrivateKey();
+  const activeSub = getVapidSubject();
+  if (!activePub || !activePriv) throw new Error("Thiếu VAPID_PUBLIC_KEY hoặc VAPID_PRIVATE_KEY");
+  
+  try {
+    webpush.setVapidDetails(activeSub, activePub, activePriv);
+  } catch (e) {
+    // Ignore if already set
+  }
+  
   return webpush.sendNotification(subscription as any, JSON.stringify(payload), { TTL: 120 });
 }

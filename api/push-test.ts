@@ -4,13 +4,23 @@ import { redis, deviceKey, sendPush, type StoredDevice } from "./_shared";
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
   try {
-    const { deviceId } = req.body || {};
-    if (!deviceId) return res.status(400).json({ error: "Thiếu deviceId" });
-    const device = await redis.get<StoredDevice>(deviceKey(deviceId));
-    if (!device) return res.status(404).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật thông báo trước." });
-    await sendPush(device.subscription, {
+    const { deviceId, subscription } = req.body || {};
+    let targetSub = subscription;
+
+    if (!targetSub && deviceId) {
+      const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+      if (device?.subscription) {
+        targetSub = device.subscription;
+      }
+    }
+
+    if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
+      return res.status(404).json({ error: "Chưa tìm thấy đăng ký Push của thiết bị. Hãy bấm Bật Web Push trước." });
+    }
+
+    await sendPush(targetSub, {
       title: "🔔 SmartSchedule - Thông báo thử",
-      body: "Nếu bạn nhìn thấy thông báo này thì Web Push đang hoạt động.",
+      body: "Nếu bạn nhìn thấy thông báo này thì Web Push trên Vercel đang hoạt động rất tốt!",
       url: "/"
     });
     return res.status(200).json({ ok: true });

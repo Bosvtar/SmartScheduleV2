@@ -3,7 +3,10 @@ import { redis, deviceKey, deviceSetKey, getVietnamNow, sendPush, type StoredDev
 
 function authorized(req: VercelRequest) {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
+  // If Vercel Cron triggered, it automatically includes x-vercel-cron: "1"
+  if (req.headers["x-vercel-cron"] === "1") return true;
+  // If no secret configured yet, allow execution for ease of setup/test
+  if (!secret) return true;
   const auth = req.headers.authorization || "";
   const supplied = Array.isArray(req.query.secret) ? req.query.secret[0] : req.query.secret;
   return auth === `Bearer ${secret}` || supplied === secret;
@@ -41,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const start = toMinutes(item.startTime);
         for (const offset of (settings.notifyMinutesBefore || [15])) {
           const target = start - Number(offset);
-          if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes < target + 2) {
+          if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
             due.push({
               key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
               title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
@@ -50,12 +53,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       }
-      if (settings.dayBeforeReminder && now.timeStr === settings.dayBeforeReminderTime) {
-        const tDate=tomorrowDateStr(), tDay=tomorrowDay();
-        const sessions=(device.schedules||[]).filter((i:any)=>i.date ? i.date===tDate : i.dayOfWeek===tDay).sort((a:any,b:any)=>String(a.startTime).localeCompare(String(b.startTime)));
-        if (sessions.length) {
-          const preview=sessions.slice(0,2).map((s:any)=>`${s.subject} (${s.startTime})`).join(', ');
-          due.push({ key:`smartschedule:sent:${deviceId}:${now.dateStr}:day-before`, title:`📅 Lịch dạy ngày mai (${tDay})`, body:`Bạn có ${sessions.length} buổi dạy: ${preview}${sessions.length>2 ? ` và ${sessions.length-2} buổi khác` : ''}.` });
+      if (settings.dayBeforeReminder && settings.dayBeforeReminderTime) {
+        const [remH, remM] = String(settings.dayBeforeReminderTime).split(":").map(Number);
+        const remMinutes = Number.isFinite(remH) && Number.isFinite(remM) ? remH * 60 + remM : NaN;
+        if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 15) {
+          const tDate = tomorrowDateStr(), tDay = tomorrowDay();
+          const sessions = (device.schedules || []).filter((i: any) => i.date ? i.date === tDate : i.dayOfWeek === tDay).sort((a: any, b: any) => String(a.startTime).localeCompare(String(b.startTime)));
+          if (sessions.length) {
+            const preview = sessions.slice(0, 2).map((s: any) => `${s.subject} (${s.startTime})`).join(', ');
+            due.push({
+              key: `smartschedule:sent:${deviceId}:${now.dateStr}:day-before`,
+              title: `📅 Lịch dạy ngày mai (${tDay})`,
+              body: `Bạn có ${sessions.length} buổi dạy: ${preview}${sessions.length > 2 ? ` và ${sessions.length - 2} buổi khác` : ''}.`
+            });
+          }
         }
       }
       for (const job of due) {

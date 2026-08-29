@@ -8,10 +8,16 @@ import {
   Check, 
   X, 
   Play, 
-  AlertCircle,
-  Vibrate,
-  Sparkles,
-  ShieldCheck
+  AlertCircle, 
+  Vibrate, 
+  Sparkles, 
+  ShieldCheck,
+  RefreshCw,
+  Server,
+  Database,
+  Info,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { NotificationSettings } from '../types';
 import { 
@@ -20,7 +26,15 @@ import {
   requestNotificationPermission, 
   dispatchNotification 
 } from '../services/notificationService';
-import { getPushStatus, subscribeToPush, syncPushState, sendServerPushTest } from '../services/pushService';
+import { 
+  getPushStatus, 
+  subscribeToPush, 
+  syncPushState, 
+  sendServerPushTest, 
+  fetchPushConfig, 
+  triggerManualCronCheck,
+  type PushBackendConfig 
+} from '../services/pushService';
 import { getSchedules } from '../services/storageService';
 
 interface NotificationSettingsModalProps {
@@ -56,15 +70,21 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [testSent, setTestSent] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
-  const [pushMessage, setPushMessage] = useState('');
+  const [pushMessage, setPushMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [backendConfig, setBackendConfig] = useState<PushBackendConfig | null>(null);
+  const [showVercelGuide, setShowVercelGuide] = useState(false);
+  const [cronResult, setCronResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPermissionStatus(Notification.permission);
     }
     setFormData(settings);
-    if (isOpen) getPushStatus().then(s => setPushSubscribed(s.subscribed)).catch(() => {});
+    if (isOpen) {
+      getPushStatus().then(s => setPushSubscribed(s.subscribed)).catch(() => {});
+      fetchPushConfig().then(cfg => setBackendConfig(cfg)).catch(() => {});
+    }
   }, [settings, isOpen]);
 
   if (!isOpen) return null;
@@ -74,6 +94,9 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setPermissionStatus(status);
     if (status === 'granted') {
       setFormData(prev => ({ ...prev, enabled: true }));
+      setPushMessage({ text: 'Đã cấp quyền thông báo thành công!', type: 'success' });
+    } else {
+      setPushMessage({ text: 'Quyền thông báo bị từ chối trong trình duyệt.', type: 'error' });
     }
   };
 
@@ -81,7 +104,6 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setFormData(prev => {
       const current = prev.notifyMinutesBefore || [];
       if (current.includes(min)) {
-        // Keep at least one option if enabled
         if (current.length === 1) return prev;
         return { ...prev, notifyMinutesBefore: current.filter(m => m !== min) };
       } else {
@@ -103,7 +125,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
 
   const handleEnablePush = async () => {
     setPushBusy(true);
-    setPushMessage('');
+    setPushMessage(null);
     try {
       await subscribeToPush();
       const next = { ...formData, enabled: true };
@@ -111,27 +133,54 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
       await syncPushState(getSchedules(), next);
       setPushSubscribed(true);
       setPermissionStatus('granted');
-      setPushMessage('✓ Đã đăng ký Web Push và đồng bộ lịch với máy chủ.');
+      setPushMessage({ text: 'Đã kết nối Web Push & đồng bộ lịch thành công!', type: 'success' });
     } catch (error: any) {
-      setPushMessage(`✕ ${error?.message || 'Không thể bật Web Push'}`);
-    } finally { setPushBusy(false); }
+      setPushMessage({ text: error?.message || 'Không thể bật Web Push', type: 'error' });
+    } finally {
+      setPushBusy(false);
+    }
   };
 
   const handleSendTestNotification = async () => {
     setPushBusy(true);
-    setPushMessage('');
+    setPushMessage(null);
     try {
-      if (!pushSubscribed) await handleEnablePush();
+      if (!pushSubscribed) {
+        await subscribeToPush();
+        setPushSubscribed(true);
+      }
       await syncPushState(getSchedules(), { ...formData, enabled: true });
       await sendServerPushTest();
       setTestSent(true);
-      setPushMessage('✓ Máy chủ đã gửi thông báo thử. Hãy kiểm tra thanh thông báo.');
-      setTimeout(() => setTestSent(false), 3000);
+      setPushMessage({ text: 'Máy chủ đã gửi thông báo thử thành công!', type: 'success' });
+      setTimeout(() => setTestSent(false), 3500);
     } catch (error: any) {
-      // fallback local notification vẫn hữu ích khi đang mở app
-      dispatchNotification('🔔 SmartSchedule - Thông báo thử', 'Thông báo cục bộ đang hoạt động, nhưng Web Push server chưa gửi được.', { ...formData, enabled: true });
-      setPushMessage(`✕ ${error?.message || 'Web Push chưa hoạt động. Đã thử thông báo cục bộ.'}`);
-    } finally { setPushBusy(false); }
+      dispatchNotification(
+        '🔔 SmartSchedule - Thông báo thử',
+        'Thông báo cục bộ đang hoạt động. Web Push server trả lời: ' + (error?.message || ''),
+        { ...formData, enabled: true }
+      );
+      setPushMessage({
+        text: `${error?.message || 'Web Push lỗi'}. Đã kích hoạt thông báo cục bộ thay thế.`,
+        type: 'error'
+      });
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleTestCron = async () => {
+    setPushBusy(true);
+    setCronResult(null);
+    try {
+      const res = await triggerManualCronCheck();
+      setCronResult(`Cron OK: Giờ VN ${res.now?.timeStr} (${res.now?.dayOfWeek}), Đã quét ${res.checked} thiết bị, Đã gửi ${res.sent} nhắc nhở, Lỗi: ${res.errors}`);
+      setPushMessage({ text: `Đã chạy Cron thành công (quét ${res.checked} thiết bị, gửi ${res.sent} thông báo).`, type: 'success' });
+    } catch (err: any) {
+      setPushMessage({ text: `Lỗi kích hoạt Cron: ${err?.message || err}`, type: 'error' });
+    } finally {
+      setPushBusy(false);
+    }
   };
 
   const handleSave = () => {
@@ -151,7 +200,7 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
             </div>
             <div>
               <h2 className="font-bold text-lg text-white">Cài Đặt Thông Báo</h2>
-              <p className="text-xs text-indigo-100">Tùy chỉnh thời gian, chuông và rung</p>
+              <p className="text-xs text-indigo-100">Web Push, chuông báo & đồng bộ nền</p>
             </div>
           </div>
           <button
@@ -172,12 +221,12 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               <div className="flex-1 text-xs">
                 <p className="font-bold text-amber-900 mb-1">Chưa bật quyền thông báo hệ thống</p>
                 <p className="text-amber-700 leading-relaxed mb-2">
-                  Để nhận được thông báo đẩy khi đóng tab hoặc làm việc khác, vui lòng cho phép quyền thông báo.
+                  Để nhận thông báo khi đóng tab hoặc làm việc khác, vui lòng cho phép quyền thông báo.
                 </p>
                 <button
                   type="button"
                   onClick={handleRequestPermission}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center space-x-1 shadow-xs"
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center space-x-1 shadow-xs transition-colors"
                 >
                   <ShieldCheck size={14} />
                   <span>Cho phép thông báo</span>
@@ -206,6 +255,119 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
               />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
             </label>
+          </div>
+
+          {/* Web Push Server Section */}
+          <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-blue-50/60 rounded-2xl border border-indigo-100/80 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-indigo-600 text-white rounded-xl">
+                  <Server size={16} />
+                </div>
+                <div>
+                  <span className="font-bold text-xs text-indigo-950 block">Thông báo nền Web Push (Vercel)</span>
+                  <span className="text-[11px] text-indigo-700">Nhắc nhở tự động qua Vercel Cron kể cả khi tắt app</span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={handleEnablePush} 
+                disabled={pushBusy} 
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                  pushSubscribed 
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                } disabled:opacity-50`}
+              >
+                {pushBusy ? 'Đang xử lý...' : pushSubscribed ? 'Đã kết nối ✓' : 'Bật Web Push'}
+              </button>
+            </div>
+
+            {/* Diagnostic Badges */}
+            <div className="flex flex-wrap gap-1.5 text-[10px]">
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${permissionStatus === 'granted' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                Quyền: {permissionStatus === 'granted' ? 'Đã cấp' : 'Chưa cấp'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${pushSubscribed ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
+                Web Push: {pushSubscribed ? 'Đã kích hoạt' : 'Chưa kích hoạt'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-white border border-indigo-200 font-medium text-indigo-800 flex items-center gap-1">
+                <Database size={10} className="text-indigo-600" />
+                Redis: {backendConfig?.isUpstashConfigured ? 'Upstash đã kết nối ✓' : 'Bộ nhớ tạm (Vercel)'}
+              </span>
+            </div>
+
+            {/* Status Message */}
+            {pushMessage && (
+              <div className={`p-2.5 rounded-xl text-xs font-medium ${
+                pushMessage.type === 'success' 
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                  : pushMessage.type === 'error'
+                  ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                  : 'bg-blue-50 text-blue-800 border border-blue-200'
+              }`}>
+                {pushMessage.text}
+              </div>
+            )}
+
+            {/* Action Buttons for Push */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                disabled={pushBusy}
+                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+              >
+                <Sparkles size={14} />
+                <span>{testSent ? 'Đã gửi ✓' : 'Gửi thử Web Push'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestCron}
+                disabled={pushBusy}
+                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+              >
+                <RefreshCw size={13} className={pushBusy ? 'animate-spin' : ''} />
+                <span>Kiểm tra Cron</span>
+              </button>
+            </div>
+
+            {cronResult && (
+              <div className="p-2 bg-white/90 border border-indigo-100 rounded-xl text-[11px] text-indigo-900 font-mono">
+                {cronResult}
+              </div>
+            )}
+
+            {/* Collapsible Vercel Setup Guide */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setShowVercelGuide(!showVercelGuide)}
+                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1 transition-colors"
+              >
+                <Info size={12} />
+                <span>Hướng dẫn cấu hình Vercel Cron & Upstash</span>
+                {showVercelGuide ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+
+              {showVercelGuide && (
+                <div className="mt-2 p-3 bg-white rounded-xl border border-indigo-100 text-[11px] text-gray-700 space-y-2 leading-relaxed">
+                  <p className="font-bold text-gray-900">Để nhận thông báo bền vững 24/7 trên Vercel:</p>
+                  <ol className="list-decimal pl-4 space-y-1">
+                    <li>Ứng dụng đã cấu hình <strong>Vercel Cron</strong> tự động chạy mỗi phút (<code className="bg-gray-100 px-1 rounded font-mono">/api/cron</code>).</li>
+                    <li>Để lưu trữ danh sách thiết bị vĩnh viễn trên Serverless, tạo 1 database miễn phí tại <strong>Upstash Redis</strong> rồi thêm 2 biến vào Vercel:
+                      <div className="mt-1 bg-gray-50 p-1.5 rounded font-mono text-[10px] text-gray-800 space-y-0.5">
+                        <div>UPSTASH_REDIS_REST_URL=https://...</div>
+                        <div>UPSTASH_REDIS_REST_TOKEN=...</div>
+                      </div>
+                    </li>
+                    <li>Khóa VAPID đã được tích hợp sẵn mặc định, hoặc bạn có thể chạy <code className="bg-gray-100 px-1 rounded font-mono">npm run generate:vapid</code> để tạo cặp khóa riêng.</li>
+                  </ol>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Section: Minutes Before Class */}
@@ -366,33 +528,6 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
                 <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 peer-disabled:opacity-40"></div>
               </label>
             </div>
-          </div>
-
-          {/* Web Push Server */}
-          <div className="p-3.5 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <span className="font-bold text-xs text-indigo-950 block">Thông báo nền Web Push</span>
-                <span className="text-[11px] text-indigo-700">Đồng bộ lịch lên máy chủ để nhận nhắc khi đóng PWA.</span>
-              </div>
-              <button type="button" onClick={handleEnablePush} disabled={pushBusy} className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-[11px] font-bold disabled:opacity-50">
-                {pushBusy ? 'Đang xử lý...' : pushSubscribed ? 'Đã kết nối ✓' : 'Bật Web Push'}
-              </button>
-            </div>
-            {pushMessage && <div className="text-[11px] font-medium text-indigo-800 break-words">{pushMessage}</div>}
-          </div>
-
-          {/* Test Notification Action */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={handleSendTestNotification}
-              disabled={pushBusy}
-              className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-2xs"
-            >
-              <Sparkles size={15} />
-              <span>{testSent ? '✓ Đã phát thông báo thử nghiệm!' : 'Gửi thử thông báo mẫu ngay'}</span>
-            </button>
           </div>
         </div>
 
