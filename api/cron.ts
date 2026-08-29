@@ -34,60 +34,97 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
   if (!authorized(req)) return res.status(401).json({ error: "Unauthorized" });
+
+  let checked = 0, sent = 0, errors = 0;
   const now = getVietnamNow();
-  let checked=0, sent=0, errors=0;
+
   try {
-    const ids = await redis.smembers<string>(deviceSetKey);
+    let ids: string[] = [];
+    try {
+      ids = await redis.smembers<string>(deviceSetKey);
+    } catch (dbErr: any) {
+      console.warn("Failed to read devices from Redis:", dbErr?.message || dbErr);
+      ids = [];
+    }
+
     for (const deviceId of ids || []) {
-      const device = await redis.get<StoredDevice>(deviceKey(deviceId));
-      if (!device?.subscription) { await redis.srem(deviceSetKey, deviceId); continue; }
-      checked++;
-      const settings = device.settings || {};
-      if (!settings.enabled) continue;
-      const due: { key:string; title:string; body:string }[] = [];
-      for (const item of device.schedules || []) {
-        const isToday = item.date ? item.date === now.dateStr : item.dayOfWeek === now.dayOfWeek;
-        if (!isToday) continue;
-        const start = toMinutes(item.startTime);
-        for (const offset of (settings.notifyMinutesBefore || [15])) {
-          const target = start - Number(offset);
-          if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
-            due.push({
-              key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
-              title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
-              body: `${item.className ? `Lớp ${item.className}` : "Buổi dạy"}${item.location ? ` • ${item.location}` : ""} • Bắt đầu lúc ${item.startTime} (${offset} phút nữa)${item.lessonName ? ` • ${item.lessonName}` : ""}`
-            });
+      try {
+        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        if (!device?.subscription) {
+          await redis.srem(deviceSetKey, deviceId).catch(() => {});
+          continue;
+        }
+        checked++;
+        const settings = device.settings || {};
+        if (!settings.enabled) continue;
+
+        const due: { key: string; title: string; body: string }[] = [];
+        for (const item of device.schedules || []) {
+          const isToday = item.date ? item.date === now.dateStr : item.dayOfWeek === now.dayOfWeek;
+          if (!isToday) continue;
+          const start = toMinutes(item.startTime);
+          for (const offset of (settings.notifyMinutesBefore || [15])) {
+            const target = start - Number(offset);
+            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
+              due.push({
+                key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
+                title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
+                body: `${item.className ? `Lớp ${item.className}` : "Buổi dạy"}${item.location ? ` • ${item.location}` : ""} • Bắt đầu lúc ${item.startTime} (${offset} phút nữa)${item.lessonName ? ` • ${item.lessonName}` : ""}`
+              });
+            }
           }
         }
-      }
-      if (settings.dayBeforeReminder && settings.dayBeforeReminderTime) {
-        const [remH, remM] = String(settings.dayBeforeReminderTime).split(":").map(Number);
-        const remMinutes = Number.isFinite(remH) && Number.isFinite(remM) ? remH * 60 + remM : NaN;
-        if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 15) {
-          const tDate = tomorrowDateStr(), tDay = tomorrowDay();
-          const sessions = (device.schedules || []).filter((i: any) => i.date ? i.date === tDate : i.dayOfWeek === tDay).sort((a: any, b: any) => String(a.startTime).localeCompare(String(b.startTime)));
-          if (sessions.length) {
-            const preview = sessions.slice(0, 2).map((s: any) => `${s.subject} (${s.startTime})`).join(', ');
-            due.push({
-              key: `smartschedule:sent:${deviceId}:${now.dateStr}:day-before`,
-              title: `📅 Lịch dạy ngày mai (${tDay})`,
-              body: `Bạn có ${sessions.length} buổi dạy: ${preview}${sessions.length > 2 ? ` và ${sessions.length - 2} buổi khác` : ''}.`
-            });
+
+        if (settings.dayBeforeReminder && settings.dayBeforeReminderTime) {
+          const [remH, remM] = String(settings.dayBeforeReminderTime).split(":").map(Number);
+          const remMinutes = Number.isFinite(remH) && Number.isFinite(remM) ? remH * 60 + remM : NaN;
+          if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 15) {
+            const tDate = tomorrowDateStr(), tDay = tomorrowDay();
+            const sessions = (device.schedules || []).filter((i: any) => i.date ? i.date === tDate : i.dayOfWeek === tDay).sort((a: any, b: any) => String(a.startTime).localeCompare(String(b.startTime)));
+            if (sessions.length) {
+              const preview = sessions.slice(0, 2).map((s: any) => `${s.subject} (${s.startTime})`).join(', ');
+              due.push({
+                key: `smartschedule:sent:${deviceId}:${now.dateStr}:day-before`,
+                title: `📅 Lịch dạy ngày mai (${tDay})`,
+                body: `Bạn có ${sessions.length} buổi dạy: ${preview}${sessions.length > 2 ? ` và ${sessions.length - 2} buổi khác` : ''}.`
+              });
+            }
           }
         }
-      }
-      for (const job of due) {
-        const claimed = await redis.set(job.key, "1", { nx:true, ex: 172800 });
-        if (!claimed) continue;
-        try { await sendPush(device.subscription, { title:job.title, body:job.body, url:"/" }); sent++; }
-        catch (error:any) {
-          errors++; await redis.del(job.key);
-          const code=error?.statusCode || error?.status;
-          if (code===404 || code===410) { await redis.del(deviceKey(deviceId)); await redis.srem(deviceSetKey,deviceId); break; }
-          console.error("push send error", deviceId, error?.message || error);
+
+        for (const job of due) {
+          const claimed = await redis.set(job.key, "1", { nx: true, ex: 172800 }).catch(() => null);
+          if (!claimed) continue;
+          try {
+            await sendPush(device.subscription, { title: job.title, body: job.body, url: "/" });
+            sent++;
+          } catch (error: any) {
+            errors++;
+            await redis.del(job.key).catch(() => {});
+            const code = error?.statusCode || error?.status;
+            if (code === 404 || code === 410) {
+              await redis.del(deviceKey(deviceId)).catch(() => {});
+              await redis.srem(deviceSetKey, deviceId).catch(() => {});
+              break;
+            }
+            console.error("push send error", deviceId, error?.message || error);
+          }
         }
+      } catch (deviceLoopErr) {
+        console.error("Error processing device:", deviceId, deviceLoopErr);
       }
     }
-    return res.status(200).json({ ok:true, now, checked, sent, errors });
-  } catch (error:any) { console.error("cron error",error); return res.status(500).json({ error:error?.message || "Cron failed", checked,sent,errors }); }
+
+    return res.status(200).json({ ok: true, now, checked, sent, errors });
+  } catch (error: any) {
+    console.error("cron global error:", error);
+    return res.status(200).json({
+      ok: false,
+      warning: "Handled error",
+      error: error?.message || String(error),
+      checked,
+      sent,
+      errors
+    });
+  }
 }
