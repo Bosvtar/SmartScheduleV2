@@ -15,8 +15,14 @@ root.render(
 );
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
-      console.warn('Không thể đăng ký Service Worker:', error);
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then((reg) => {
+        // Tự động kiểm tra bản cập nhật mới
+        reg.update().catch(() => {});
+      })
+      .catch((error) => {
+        console.warn('Không thể đăng ký Service Worker:', error);
+      });
   });
 }
