@@ -8,6 +8,11 @@ import {
   deviceSetKey,
   sendPush,
   getVietnamNow,
+  normalizeDayOfWeek,
+  normalizeDateStr,
+  toMinutes,
+  tomorrowDateStr,
+  tomorrowDay,
   getVapidPublicKey,
   isUpstashConfigured,
   isCustomVapidConfigured,
@@ -369,6 +374,47 @@ async function startServer() {
     }
   });
 
+  // Push Delayed Test endpoint (for testing screen-off lockscreen notifications)
+  app.post("/api/push-test-delayed", async (req, res) => {
+    try {
+      const { deviceId, subscription, delaySeconds = 10 } = req.body || {};
+      let targetSub = subscription;
+
+      if (!targetSub && deviceId) {
+        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        if (device?.subscription) {
+          targetSub = device.subscription;
+        }
+      }
+
+      if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
+        return res.status(400).json({ error: "Thiết bị chưa được đồng bộ Web Push. Hãy bấm 'Bật Web Push' trước." });
+      }
+
+      const delay = Math.max(3, Math.min(60, Number(delaySeconds) || 10));
+      console.log(`[Push Delayed Test] Sẽ gửi thông báo sau ${delay}s tới thiết bị: ${deviceId || "ẩn"}`);
+
+      setTimeout(async () => {
+        try {
+          await sendPush(targetSub, {
+            title: "🔔 SmartSchedule - Màn hình khóa OK!",
+            body: `Kiểm tra thành công! Thông báo đã xuất hiện sau ${delay}s (ngay cả khi điện thoại tắt màn hình).`,
+            url: "/",
+            tag: `test-delayed-${Date.now()}`,
+            vibrate: [400, 200, 400, 200, 800],
+          });
+          console.log(`[Push Delayed Test] Đã gửi thông báo sau ${delay}s thành công.`);
+        } catch (err: any) {
+          console.error(`[Push Delayed Test] Lỗi gửi thông báo trễ:`, err?.message || err);
+        }
+      }, delay * 1000);
+
+      return res.status(200).json({ ok: true, delaySeconds: delay, message: `Hệ thống sẽ gửi thông báo sau ${delay} giây. Hãy bấm nút nguồn tắt màn hình để kiểm tra!` });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || "Không thể lên lịch gửi thông báo thử" });
+    }
+  });
+
   // Push Unsubscribe endpoint
   app.post("/api/push-unsubscribe", async (req, res) => {
     try {
@@ -382,22 +428,14 @@ async function startServer() {
     }
   });
 
-  // Cron endpoint
-  const cronHandler = async (req: express.Request, res: express.Response) => {
-    const secret = (process.env.CRON_SECRET || "").trim();
-    const isPlaceholderSecret = !secret || secret.startsWith("replace_with") || secret.startsWith("your_") || secret.length < 8;
-    if (!isPlaceholderSecret && req.headers["x-vercel-cron"] !== "1") {
-      const auth = req.headers.authorization || "";
-      const supplied = req.query.secret;
-      if (auth !== `Bearer ${secret}` && supplied !== secret) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-    }
+  // Core reusable Cron Engine
+  async function runCronEngine() {
     const now = getVietnamNow();
     let checked = 0, sent = 0, errors = 0;
-    try {
-      const ids = await redis.smembers<string>(deviceSetKey);
-      for (const deviceId of ids || []) {
+    const ids = await redis.smembers<string>(deviceSetKey);
+
+    for (const deviceId of ids || []) {
+      try {
         const device = await redis.get<StoredDevice>(deviceKey(deviceId));
         if (!device?.subscription) {
           await redis.srem(deviceSetKey, deviceId);
@@ -406,15 +444,26 @@ async function startServer() {
         checked++;
         const settings = device.settings || {};
         if (!settings.enabled) continue;
+
         const due: { key: string; title: string; body: string }[] = [];
+        const nowDayNorm = normalizeDayOfWeek(now.dayOfWeek);
+
         for (const item of device.schedules || []) {
-          const isToday = item.date ? item.date === now.dateStr : item.dayOfWeek === now.dayOfWeek;
+          const itemDateNorm = normalizeDateStr(item.date);
+          const itemDayNorm = normalizeDayOfWeek(item.dayOfWeek);
+
+          // Hôm nay: nếu có ngày thì so sánh ngày, nếu là lịch cố định không có ngày thì so sánh thứ
+          const isToday = itemDateNorm ? (itemDateNorm === now.dateStr) : (itemDayNorm === nowDayNorm);
           if (!isToday) continue;
-          const [h, m] = String(item.startTime || "").split(":").map(Number);
-          const start = Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN;
+
+          const start = toMinutes(item.startTime);
+          if (!Number.isFinite(start)) continue;
+
           for (const offset of (settings.notifyMinutesBefore || [15])) {
             const target = start - Number(offset);
-            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= target + 5) {
+            // Cửa sổ gửi thông báo: từ thời điểm cần nhắc (start - offset) đến khi vào lớp hoặc trễ tối đa 15 phút
+            const windowEnd = Math.min(start + 5, target + 20);
+            if (Number.isFinite(target) && now.totalMinutes >= target && now.totalMinutes <= windowEnd) {
               due.push({
                 key: `smartschedule:sent:${deviceId}:${now.dateStr}:${item.id}:before:${offset}`,
                 title: `🔔 Nhắc lịch dạy: ${item.subject || "Buổi dạy"}`,
@@ -423,11 +472,42 @@ async function startServer() {
             }
           }
         }
+
+        // Nhắc lịch ngày mai vào buổi tối (nếu bật)
+        if (settings.dayBeforeReminder && settings.dayBeforeReminderTime) {
+          const remMinutes = toMinutes(settings.dayBeforeReminderTime);
+          if (Number.isFinite(remMinutes) && now.totalMinutes >= remMinutes && now.totalMinutes <= remMinutes + 25) {
+            const tDate = tomorrowDateStr();
+            const tDay = tomorrowDay();
+            const tDayNorm = normalizeDayOfWeek(tDay);
+            const tomorrowSessions = (device.schedules || []).filter(item => {
+              const itemDateNorm = normalizeDateStr(item.date);
+              const itemDayNorm = normalizeDayOfWeek(item.dayOfWeek);
+              return itemDateNorm ? (itemDateNorm === tDate) : (itemDayNorm === tDayNorm);
+            });
+
+            if (tomorrowSessions.length > 0) {
+              due.push({
+                key: `smartschedule:sent:${deviceId}:${now.dateStr}:day_before`,
+                title: `🔔 Lịch dạy ngày mai (${tDay}, ${tDate})`,
+                body: `Bạn có ${tomorrowSessions.length} buổi dạy ngày mai. Tiết đầu tiên bắt đầu lúc ${tomorrowSessions[0].startTime}.`,
+              });
+            }
+          }
+        }
+
+        // Gửi các thông báo đến hạn
         for (const job of due) {
           const claimed = await redis.set(job.key, "1", { nx: true, ex: 172800 });
           if (!claimed) continue;
           try {
-            await sendPush(device.subscription, { title: job.title, body: job.body, url: "/" });
+            await sendPush(device.subscription, {
+              title: job.title,
+              body: job.body,
+              url: "/",
+              tag: job.key,
+              vibrate: [400, 200, 400, 200, 800],
+            });
             sent++;
           } catch (error: any) {
             errors++;
@@ -441,16 +521,55 @@ async function startServer() {
             console.error("push send error", deviceId, error?.message || error);
           }
         }
+      } catch (devErr) {
+        console.warn("Device cron processing error:", deviceId, devErr);
       }
-      return res.status(200).json({ ok: true, now, checked, sent, errors });
+    }
+
+    return { ok: true, now, checked, sent, errors, devicesCount: ids.length };
+  }
+
+  // Cron endpoint (dành cho external cron trigger hoặc test từ UI)
+  const cronHandler = async (req: express.Request, res: express.Response) => {
+    const secret = (process.env.CRON_SECRET || "").trim();
+    const isPlaceholderSecret = !secret || secret.startsWith("replace_with") || secret.startsWith("your_") || secret.length < 8;
+    if (!isPlaceholderSecret && req.headers["x-vercel-cron"] !== "1") {
+      const auth = req.headers.authorization || "";
+      const supplied = req.query.secret;
+      if (auth !== `Bearer ${secret}` && supplied !== secret) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    try {
+      const result = await runCronEngine();
+      return res.status(200).json(result);
     } catch (error: any) {
       console.error("cron error", error);
-      return res.status(500).json({ error: error?.message || "Cron failed", checked, sent, errors });
+      return res.status(500).json({ error: error?.message || "Cron failed" });
     }
   };
 
   app.get("/api/cron", cronHandler);
   app.post("/api/cron", cronHandler);
+
+  // Bộ đếm thời gian tự động trên Server (Autonomous Background Cron)
+  // Tự động kiểm tra mỗi 30 giây để đánh thức điện thoại và gửi Web Push ngay cả khi tắt màn hình!
+  const AUTONOMOUS_CRON_INTERVAL_MS = 30000;
+  let isCronRunning = false;
+  setInterval(async () => {
+    if (isCronRunning) return;
+    isCronRunning = true;
+    try {
+      const result = await runCronEngine();
+      if (result.sent > 0) {
+        console.log(`[Autonomous Cron] Đã gửi ${result.sent} thông báo đẩy tới điện thoại lúc ${result.now.timeStr}`);
+      }
+    } catch (err: any) {
+      console.warn("[Autonomous Cron] Lỗi chạy ngầm:", err?.message || err);
+    } finally {
+      isCronRunning = false;
+    }
+  }, AUTONOMOUS_CRON_INTERVAL_MS);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

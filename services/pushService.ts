@@ -231,3 +231,28 @@ export const triggerManualCronCheck = async () => {
   return data;
 };
 
+export const testLockScreenPush = async (delaySeconds = 10) => {
+  const reg = await ensureServiceWorker();
+  let sub = await reg.pushManager.getSubscription();
+
+  if (!sub) {
+    sub = await subscribeToPush(true);
+  }
+
+  const response = await fetch('/api/push-test-delayed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deviceId: getDeviceId(),
+      subscription: sub ? sub.toJSON() : undefined,
+      delaySeconds,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Không thể gửi lệnh kiểm tra màn hình khóa');
+  }
+  return data;
+};
+

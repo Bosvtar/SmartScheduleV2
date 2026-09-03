@@ -14,7 +14,10 @@ import {
   ShieldCheck,
   RefreshCw,
   Server,
-  Database
+  Database,
+  Lock,
+  Timer,
+  HelpCircle
 } from 'lucide-react';
 import { NotificationSettings } from '../types';
 import { 
@@ -28,6 +31,7 @@ import {
   subscribeToPush, 
   syncPushState, 
   sendServerPushTest, 
+  testLockScreenPush,
   fetchPushConfig, 
   triggerManualCronCheck,
   type PushBackendConfig 
@@ -71,6 +75,16 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [backendConfig, setBackendConfig] = useState<PushBackendConfig | null>(null);
   const [cronResult, setCronResult] = useState<string | null>(null);
+  const [delayedCountdown, setDelayedCountdown] = useState<number | null>(null);
+  const [showLockscreenGuide, setShowLockscreenGuide] = useState(false);
+
+  useEffect(() => {
+    if (delayedCountdown === null || delayedCountdown <= 0) return;
+    const timer = setTimeout(() => {
+      setDelayedCountdown(prev => (prev !== null && prev > 1 ? prev - 1 : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [delayedCountdown]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -171,6 +185,26 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
         text: `Lỗi Web Push: ${error?.message || 'Không gửi được'}.`,
         type: 'error'
       });
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleTestDelayedLockScreen = async () => {
+    setPushBusy(true);
+    setPushMessage(null);
+    try {
+      await subscribeToPush(true);
+      setPushSubscribed(true);
+      await syncPushState(getSchedules(), { ...formData, enabled: true });
+      await testLockScreenPush(10);
+      setDelayedCountdown(10);
+      setPushMessage({
+        text: '⏱️ Đã lên lịch! Hãy bấm nút nguồn TẮT MÀN HÌNH điện thoại ngay bây giờ. Thông báo sẽ đến sau 10 giây!',
+        type: 'success'
+      });
+    } catch (error: any) {
+      setPushMessage({ text: error?.message || 'Không thể tạo thông báo thử trễ', type: 'error' });
     } finally {
       setPushBusy(false);
     }
@@ -492,35 +526,97 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
             )}
 
             {/* Action Buttons for Push & Cron Testing */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="space-y-2 pt-1">
+              {/* Delayed Test Button for Lockscreen */}
               <button
                 type="button"
-                onClick={handleSendTestNotification}
-                disabled={pushBusy}
-                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+                onClick={handleTestDelayedLockScreen}
+                disabled={pushBusy || delayedCountdown !== null}
+                className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-sm ${
+                  delayedCountdown !== null
+                    ? 'bg-amber-500 text-white animate-pulse'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
               >
-                <Sparkles size={14} />
-                <span>{testSent ? 'Đã gửi ✓' : 'Gửi thử Web Push'}</span>
+                {delayedCountdown !== null ? (
+                  <>
+                    <Timer size={15} className="animate-spin" />
+                    <span>Đang đếm ngược: {delayedCountdown}s (TẮT MÀN HÌNH NGAY!)</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock size={15} />
+                    <span>Thử thông báo sau 10s (Tắt màn hình để thử)</span>
+                  </>
+                )}
               </button>
-              <button
-                type="button"
-                onClick={handleTestCron}
-                disabled={pushBusy}
-                className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
-              >
-                <RefreshCw size={13} className={pushBusy ? 'animate-spin' : ''} />
-                <span>Kiểm tra Cron</span>
-              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleSendTestNotification}
+                  disabled={pushBusy}
+                  className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+                >
+                  <Sparkles size={14} />
+                  <span>{testSent ? 'Đã gửi ✓' : 'Gửi thử ngay'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestCron}
+                  disabled={pushBusy}
+                  className="py-2 px-3 bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all shadow-2xs"
+                >
+                  <RefreshCw size={13} className={pushBusy ? 'animate-spin' : ''} />
+                  <span>Kiểm tra Cron</span>
+                </button>
+              </div>
             </div>
 
-            {/* Background Notification Note for Mobile Lockscreen */}
-            <div className="p-2.5 bg-white/80 border border-indigo-100 rounded-xl text-[11px] text-gray-600 space-y-1">
-              <span className="font-bold text-indigo-900 block flex items-center gap-1">
-                💡 Lưu ý khi tắt màn hình điện thoại:
-              </span>
-              <p className="leading-relaxed">
-                Để nhận thông báo khi điện thoại tắt màn hình: Bấm <strong>"Bật Web Push"</strong> ở trên, cho phép quyền thông báo trên trình duyệt (Chrome/Safari) và thêm ứng dụng vào Màn hình chính (PWA). Đảm bảo không bật chế độ tiết kiệm pin nghiêm ngặt cho trình duyệt.
-              </p>
+            {/* Lockscreen & Screen-off Guidance */}
+            <div className="p-3 bg-white/90 border border-indigo-100 rounded-xl text-[11px] text-gray-700 space-y-2">
+              <div 
+                className="flex items-center justify-between cursor-pointer font-bold text-indigo-900"
+                onClick={() => setShowLockscreenGuide(prev => !prev)}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Smartphone size={14} className="text-indigo-600" />
+                  Hướng dẫn để nhận thông báo khi TẮT MÀN HÌNH:
+                </span>
+                <span className="text-indigo-600 text-xs">{showLockscreenGuide ? 'Thu gọn ▲' : 'Xem chi tiết ▼'}</span>
+              </div>
+
+              {showLockscreenGuide ? (
+                <div className="space-y-2 text-[11px] text-gray-600 pt-1 border-t border-indigo-50 leading-relaxed">
+                  <p>
+                    Hệ thống đã tích hợp <strong>Bộ quét tự động 30s trên máy chủ</strong> và Web Push chuẩn cao cấp nhất (High Urgency). Để điện thoại luôn sáng màn hình & đổ chuông:
+                  </p>
+                  <div className="bg-indigo-50/70 p-2 rounded-lg space-y-1">
+                    <p className="font-semibold text-indigo-950">1. Cài đặt ứng dụng vào Màn hình chính (PWA):</p>
+                    <p className="text-gray-600 pl-2">
+                      • Trên Android: Mở bằng Chrome ➔ Bấm menu 3 chấm (⋮) ➔ Chọn <strong>"Cài đặt ứng dụng"</strong> hoặc "Thêm vào Màn hình chính".
+                      <br />
+                      • Trên iPhone: Mở bằng Safari ➔ Bấm nút Chia sẻ (biểu tượng ô vuông mũi tên lên) ➔ Chọn <strong>"Thêm vào MH chính"</strong>.
+                    </p>
+                  </div>
+                  <div className="bg-indigo-50/70 p-2 rounded-lg space-y-1">
+                    <p className="font-semibold text-indigo-950">2. Cài đặt quyền Màn hình khóa trên điện thoại:</p>
+                    <p className="text-gray-600 pl-2">
+                      Vào <strong>Cài đặt điện thoại</strong> ➔ <strong>Ứng dụng</strong> ➔ Tìm <strong>Chrome / SmartSchedule</strong> ➔ <strong>Thông báo</strong>:
+                      <br />
+                      ✓ BẬT <em>"Hiển thị trên màn hình khóa"</em> (Băng rôn / Đốm thông báo).
+                      <br />
+                      ✓ BẬT <em>"Cho phép âm thanh và rung"</em>.
+                      <br />
+                      ✓ Tắt <em>"Tiết kiệm pin nghiêm ngặt"</em> đối với Chrome / SmartSchedule.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-500 leading-snug">
+                  Đã kích hoạt Web Push máy chủ 30s. Bấm <strong>"Thử thông báo sau 10s"</strong> rồi bấm tắt màn hình ngay để trải nghiệm thực tế.
+                </p>
+              )}
             </div>
 
             {cronResult && (

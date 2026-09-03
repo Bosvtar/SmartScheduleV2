@@ -1,4 +1,4 @@
-const CACHE = 'smartschedule-v5-webpush';
+const CACHE = 'smartschedule-v7-webpush';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -71,11 +71,15 @@ self.addEventListener('push', (event) => {
     renotify: true,
     requireInteraction: true,
     silent: false,
-    vibrate: data.vibrate || [300, 100, 300, 100, 400],
+    vibrate: data.vibrate || [500, 200, 500, 200, 800],
     data: {
       url: data.url || '/',
       timestamp: Date.now()
-    }
+    },
+    actions: [
+      { action: 'open', title: '📅 Mở lịch' },
+      { action: 'dismiss', title: '✕ Đóng' }
+    ]
   };
 
   event.waitUntil(
@@ -85,6 +89,9 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'dismiss') {
+    return;
+  }
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       const target = event.notification.data?.url || '/';

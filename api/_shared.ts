@@ -1,5 +1,7 @@
 import { Redis } from "@upstash/redis";
 import { createRequire } from "module";
+import fs from "fs";
+import path from "path";
 
 // Safe require for CommonJS packages in Node ESM
 let webpushLib: any = null;
@@ -19,9 +21,56 @@ function getWebPush() {
   return webpushLib;
 }
 
-// In-memory fallback if Upstash credentials are not configured
+// In-memory fallback if Upstash credentials are not configured, with file-based persistence
 const memoryStore = new Map<string, any>();
 const memorySets = new Map<string, Set<string>>();
+
+const LOCAL_STORE_FILE = path.join(process.cwd(), ".devices_store.json");
+
+function loadLocalStore() {
+  try {
+    if (fs.existsSync(LOCAL_STORE_FILE)) {
+      const content = fs.readFileSync(LOCAL_STORE_FILE, "utf-8");
+      const parsed = JSON.parse(content);
+      if (parsed?.store && typeof parsed.store === "object") {
+        for (const [k, v] of Object.entries(parsed.store)) {
+          memoryStore.set(k, v);
+        }
+      }
+      if (parsed?.sets && typeof parsed.sets === "object") {
+        for (const [k, v] of Object.entries(parsed.sets)) {
+          if (Array.isArray(v)) {
+            memorySets.set(k, new Set(v));
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load local devices store:", e);
+  }
+}
+
+let saveTimeout: any = null;
+function persistLocalStore() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      const storeObj: Record<string, any> = {};
+      for (const [k, v] of memoryStore.entries()) {
+        storeObj[k] = v;
+      }
+      const setsObj: Record<string, string[]> = {};
+      for (const [k, v] of memorySets.entries()) {
+        setsObj[k] = Array.from(v);
+      }
+      fs.writeFileSync(LOCAL_STORE_FILE, JSON.stringify({ store: storeObj, sets: setsObj }), "utf-8");
+    } catch (e) {
+      console.warn("Could not persist local devices store:", e);
+    }
+  }, 1000);
+}
+
+loadLocalStore();
 
 let upstashClient: Redis | null = null;
 const rawUrl = process.env.UPSTASH_REDIS_REST_URL;
@@ -68,6 +117,7 @@ export const redis = {
       return null;
     }
     memoryStore.set(key, value);
+    persistLocalStore();
     return "OK";
   },
   del: async (key: string): Promise<number> => {
@@ -79,6 +129,7 @@ export const redis = {
       }
     }
     const existed = memoryStore.delete(key);
+    if (existed) persistLocalStore();
     return existed ? 1 : 0;
   },
   sadd: async (key: string, member: string): Promise<number> => {
@@ -95,6 +146,7 @@ export const redis = {
     const set = memorySets.get(key)!;
     const sizeBefore = set.size;
     set.add(member);
+    persistLocalStore();
     return set.size - sizeBefore;
   },
   srem: async (key: string, member: string): Promise<number> => {
@@ -108,6 +160,7 @@ export const redis = {
     const set = memorySets.get(key);
     if (!set) return 0;
     const deleted = set.delete(member);
+    if (deleted) persistLocalStore();
     return deleted ? 1 : 0;
   },
   smembers: async <T = string>(key: string): Promise<T[]> => {
@@ -200,6 +253,55 @@ export type PushSubscriptionJSON = {
 export const deviceKey = (id: string) => `smartschedule:device:${id}`;
 export const deviceSetKey = "smartschedule:devices";
 
+export function normalizeDayOfWeek(day: string): string {
+  if (!day) return "";
+  const clean = day.trim().toLowerCase().replace(/\s+/g, " ");
+  if (clean.includes("2") || clean.includes("hai") || clean.includes("mon")) return "Thứ 2";
+  if (clean.includes("3") || clean.includes("ba") || clean.includes("tue")) return "Thứ 3";
+  if (clean.includes("4") || clean.includes("tư") || clean.includes("tu") || clean.includes("bốn") || clean.includes("bon") || clean.includes("wed")) return "Thứ 4";
+  if (clean.includes("5") || clean.includes("năm") || clean.includes("nam") || clean.includes("thu")) return "Thứ 5";
+  if (clean.includes("6") || clean.includes("sáu") || clean.includes("sau") || clean.includes("fri")) return "Thứ 6";
+  if (clean.includes("7") || clean.includes("bảy") || clean.includes("bay") || clean.includes("sat")) return "Thứ 7";
+  if (clean.includes("nhật") || clean.includes("nhat") || clean.includes("cn") || clean.includes("sun")) return "Chủ Nhật";
+  return day.trim();
+}
+
+export function normalizeDateStr(dateStr?: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.trim().split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    const d = parts[0].padStart(2, "0");
+    const m = parts[1].padStart(2, "0");
+    const y = parts[2];
+    return `${d}/${m}/${y}`;
+  }
+  return dateStr.trim();
+}
+
+export function toMinutes(raw: string): number {
+  if (!raw) return NaN;
+  const clean = String(raw).trim().replace(/h/i, ":");
+  const parts = clean.split(":").map(p => parseInt(p.trim(), 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+    return parts[0] * 60 + parts[1];
+  }
+  return NaN;
+}
+
+export function tomorrowDateStr(now = new Date()) {
+  const vn = getVietnamNow(now);
+  const [dd, mm, yyyy] = vn.dateStr.split("/").map(Number);
+  const utc = new Date(Date.UTC(yyyy, mm - 1, dd) + 86400000);
+  const d = String(utc.getUTCDate()).padStart(2, "0");
+  const m = String(utc.getUTCMonth() + 1).padStart(2, "0");
+  const y = utc.getUTCFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+export function tomorrowDay(now = new Date()) {
+  return getVietnamNow(new Date(now.getTime() + 86400000)).dayOfWeek;
+}
+
 export function getVietnamNow(date = new Date()) {
   try {
     const parts = new Intl.DateTimeFormat("en-GB", {
@@ -220,7 +322,7 @@ export function getVietnamNow(date = new Date()) {
       dateStr: `${day}/${month}/${year}`,
       timeStr: `${hour}:${minute}`,
       totalMinutes: Number(hour) * 60 + Number(minute),
-      dayOfWeek: dayMap[weekdayEn] || "",
+      dayOfWeek: dayMap[weekdayEn] || "Thứ 2",
     };
   } catch {
     const d = new Date();
@@ -249,10 +351,11 @@ export async function sendPush(subscription: PushSubscriptionJSON, payload: unkn
     console.warn("setVapidDetails warning:", err?.message || err);
   }
   
+  // Note: Do not set static "topic" here because in RFC 8030 it collapses messages
+  // and FCM throttles topic-based notifications when mobile devices are sleeping.
   return wp.sendNotification(subscription as any, JSON.stringify(payload), {
     TTL: 86400,
-    urgency: "high",
-    topic: "smartschedule-reminder"
+    urgency: "high"
   });
 }
 
