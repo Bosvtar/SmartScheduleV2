@@ -194,13 +194,13 @@ const NotificationSettingsModal: React.FC<NotificationSettingsModalProps> = ({
     setPushBusy(true);
     setPushMessage(null);
     try {
-      await subscribeToPush(true);
-      setPushSubscribed(true);
+      const sub = await subscribeToPush(false);
+      setPushSubscribed(!!sub);
       await syncPushState(getSchedules(), { ...formData, enabled: true });
-      await testLockScreenPush(10);
+      const res = await testLockScreenPush(10);
       setDelayedCountdown(10);
       setPushMessage({
-        text: '⏱️ Đã lên lịch! Hãy bấm nút nguồn TẮT MÀN HÌNH điện thoại ngay bây giờ. Thông báo sẽ đến sau 10 giây!',
+        text: res?.message || '⏱️ Đã lên lịch! Hãy bấm nút nguồn TẮT MÀN HÌNH điện thoại ngay bây giờ. Thông báo sẽ đến sau 10 giây!',
         type: 'success'
       });
     } catch (error: any) {

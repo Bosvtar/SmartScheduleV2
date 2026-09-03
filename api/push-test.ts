@@ -86,16 +86,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const { deviceId, subscription } = body || {};
+    const { deviceId, subscription, delaySeconds = 0 } = body || {};
     let targetSub = subscription;
+
+    if (typeof targetSub === "string") {
+      try { targetSub = JSON.parse(targetSub); } catch {}
+    }
 
     if (!targetSub && deviceId) {
       const client = await getUpstashClient();
       if (client) {
         try {
-          const device: any = await client.get(`smartschedule:device:${deviceId}`);
+          let device: any = await client.get(`smartschedule:device:${deviceId}`);
+          if (typeof device === "string") {
+            try { device = JSON.parse(device); } catch {}
+          }
           if (device?.subscription) {
             targetSub = device.subscription;
+            if (typeof targetSub === "string") {
+              try { targetSub = JSON.parse(targetSub); } catch {}
+            }
           }
         } catch (e) {
           console.warn("Redis fetch error in push-test:", e);
@@ -122,14 +132,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn("setVapidDetails warning:", vErr?.message);
     }
 
+    const delay = Math.max(0, Math.min(60, Number(delaySeconds) || 0));
+
     const payload = {
-      title: "🔔 SmartSchedule - Thông báo thử",
-      body: "Chúc mừng! Web Push trên Vercel đang hoạt động rất tốt.",
+      title: delay > 0 ? "🔔 SmartSchedule - Màn hình khóa OK!" : "🔔 SmartSchedule - Thông báo thử",
+      body: delay > 0 
+        ? `Kiểm tra thành công! Thông báo đã xuất hiện sau ${delay}s (ngay cả khi điện thoại tắt màn hình).`
+        : "Chúc mừng! Web Push đang hoạt động rất tốt.",
       url: "/",
+      tag: `test-push-${Date.now()}`,
+      vibrate: [500, 200, 500, 200, 800],
     };
 
-    await wp.sendNotification(targetSub, JSON.stringify(payload), { TTL: 120 });
-    return res.status(200).json({ ok: true, message: "Đã gửi thông báo thử thành công!" });
+    if (delay > 0) {
+      // In serverless, wait for delay to ensure the container sends before suspending
+      await new Promise((resolve) => setTimeout(resolve, delay * 1000));
+    }
+
+    await wp.sendNotification(targetSub, JSON.stringify(payload), { TTL: 86400, urgency: "high" });
+    return res.status(200).json({ 
+      ok: true, 
+      delaySeconds: delay, 
+      message: delay > 0 
+        ? `Đã gửi thông báo sau ${delay}s!` 
+        : "Đã gửi thông báo thử thành công!" 
+    });
   } catch (error: any) {
     const status = error?.statusCode || error?.status || 500;
     console.error("push-test error:", error);

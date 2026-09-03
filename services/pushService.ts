@@ -179,19 +179,27 @@ export const sendServerPushTest = async (retryOnAuthError = true): Promise<any> 
   let sub = await reg.pushManager.getSubscription();
 
   if (!sub) {
-    sub = await subscribeToPush(true);
+    sub = await subscribeToPush(false);
   }
 
-  const response = await fetch('/api/push-test', {
+  const payload = {
+    deviceId: getDeviceId(),
+    subscription: sub ? sub.toJSON() : undefined,
+  };
+
+  let response = await fetch('/api/push-test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      deviceId: getDeviceId(),
-      subscription: sub ? sub.toJSON() : undefined,
-    }),
+    body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  const resText = await response.text();
+  let data: any = {};
+  try {
+    data = JSON.parse(resText);
+  } catch {
+    data = { error: resText?.slice(0, 150) };
+  }
   
   // Nếu khóa VAPID lệch (401/403) hoặc đăng ký hết hạn (410/404), tự động re-subscribe và thử lại 1 lần
   if (!response.ok) {
@@ -207,17 +215,22 @@ export const sendServerPushTest = async (retryOnAuthError = true): Promise<any> 
           subscription: newSub ? newSub.toJSON() : undefined,
         }),
       });
-      const retryData = await retryRes.json().catch(() => ({}));
+      const retryText = await retryRes.text();
+      let retryData: any = {};
+      try {
+        retryData = JSON.parse(retryText);
+      } catch {
+        retryData = { error: retryText?.slice(0, 150) };
+      }
       if (!retryRes.ok) {
-        throw new Error(retryData.error || 'Web Push server không gửi được');
+        throw new Error(retryData.error || `Web Push server không gửi được (Mã ${retryRes.status})`);
       }
       return retryData;
     }
-    throw new Error(data.error || 'Không thể gửi thông báo thử từ máy chủ');
+    throw new Error(data.error || `Lỗi máy chủ (${response.status}) khi gửi thông báo thử`);
   }
   return data;
 };
-
 
 export const triggerManualCronCheck = async () => {
   const response = await fetch('/api/cron', {
@@ -231,27 +244,70 @@ export const triggerManualCronCheck = async () => {
   return data;
 };
 
-export const testLockScreenPush = async (delaySeconds = 10) => {
+export const testLockScreenPush = async (delaySeconds = 10, retryOnAuthError = true): Promise<any> => {
   const reg = await ensureServiceWorker();
   let sub = await reg.pushManager.getSubscription();
 
   if (!sub) {
-    sub = await subscribeToPush(true);
+    sub = await subscribeToPush(false);
   }
 
-  const response = await fetch('/api/push-test-delayed', {
+  const payload = {
+    deviceId: getDeviceId(),
+    subscription: sub ? sub.toJSON() : undefined,
+    delaySeconds,
+  };
+
+  // Ưu tiên /api/push-test (đã hỗ trợ delaySeconds), nếu 404 thì thử /api/push-test-delayed
+  let response = await fetch('/api/push-test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      deviceId: getDeviceId(),
-      subscription: sub ? sub.toJSON() : undefined,
-      delaySeconds,
-    }),
+    body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  if (!response.ok && response.status === 404) {
+    response = await fetch('/api/push-test-delayed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const resText = await response.text();
+  let data: any = {};
+  try {
+    data = JSON.parse(resText);
+  } catch {
+    data = { error: resText?.slice(0, 150) };
+  }
+
   if (!response.ok) {
-    throw new Error(data.error || 'Không thể gửi lệnh kiểm tra màn hình khóa');
+    const status = response.status;
+    if (retryOnAuthError && (status === 401 || status === 403 || status === 410 || status === 400)) {
+      console.warn(`Lockscreen test trả về mã ${status}, đang làm mới subscription và thử lại...`);
+      const newSub = await subscribeToPush(true);
+      const retryRes = await fetch('/api/push-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: getDeviceId(),
+          subscription: newSub ? newSub.toJSON() : undefined,
+          delaySeconds,
+        }),
+      });
+      const retryText = await retryRes.text();
+      let retryData: any = {};
+      try {
+        retryData = JSON.parse(retryText);
+      } catch {
+        retryData = { error: retryText?.slice(0, 150) };
+      }
+      if (!retryRes.ok) {
+        throw new Error(retryData.error || `Không thể gửi lệnh kiểm tra (Mã lỗi ${retryRes.status})`);
+      }
+      return retryData;
+    }
+    throw new Error(data.error || `Máy chủ phản hồi lỗi (${response.status}) khi gửi lệnh kiểm tra`);
   }
   return data;
 };

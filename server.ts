@@ -339,29 +339,69 @@ async function startServer() {
     }
   });
 
-  // Push Test endpoint
-  app.post("/api/push-test", async (req, res) => {
+  // Push Test & Delayed Push Test endpoint
+  const handlePushTestRequest = async (req: express.Request, res: express.Response) => {
     try {
-      const { deviceId, subscription } = req.body || {};
+      const { deviceId, subscription, delaySeconds = 0 } = req.body || {};
       let targetSub = subscription;
 
+      if (typeof targetSub === "string") {
+        try { targetSub = JSON.parse(targetSub); } catch {}
+      }
+
       if (!targetSub && deviceId) {
-        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        let device = await redis.get<StoredDevice>(deviceKey(deviceId));
+        if (typeof device === "string") {
+          try { device = JSON.parse(device); } catch {}
+        }
         if (device?.subscription) {
           targetSub = device.subscription;
+          if (typeof targetSub === "string") {
+            try { targetSub = JSON.parse(targetSub); } catch {}
+          }
         }
       }
 
       if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
-        return res.status(400).json({ error: "Thiết bị chưa được đồng bộ. Hãy bấm Bật Web Push trước." });
+        return res.status(400).json({ 
+          error: "Thiết bị chưa có thông tin đăng ký Push. Vui lòng bấm 'Bật Web Push' để cấp quyền và đồng bộ trước." 
+        });
       }
 
-      await sendPush(targetSub, {
-        title: "🔔 SmartSchedule - Thông báo thử",
-        body: "Chúc mừng! Web Push đang hoạt động rất tốt.",
-        url: "/",
-      });
-      return res.status(200).json({ ok: true });
+      const delay = Math.max(0, Math.min(60, Number(delaySeconds) || 0));
+
+      const doSend = async () => {
+        await sendPush(targetSub, {
+          title: delay > 0 ? "🔔 SmartSchedule - Màn hình khóa OK!" : "🔔 SmartSchedule - Thông báo thử",
+          body: delay > 0 
+            ? `Kiểm tra thành công! Thông báo đã xuất hiện sau ${delay}s (ngay cả khi điện thoại tắt màn hình).`
+            : "Chúc mừng! Web Push đang hoạt động rất tốt.",
+          url: "/",
+          tag: `test-push-${Date.now()}`,
+          vibrate: [500, 200, 500, 200, 800],
+        });
+      };
+
+      if (delay > 0) {
+        console.log(`[Push Delayed Test] Đã lên lịch gửi thông báo sau ${delay}s tới thiết bị: ${deviceId || "ẩn"}`);
+        setTimeout(async () => {
+          try {
+            await doSend();
+            console.log(`[Push Delayed Test] Đã gửi thông báo sau ${delay}s thành công.`);
+          } catch (err: any) {
+            console.error(`[Push Delayed Test] Lỗi gửi thông báo trễ:`, err?.message || err);
+          }
+        }, delay * 1000);
+
+        return res.status(200).json({ 
+          ok: true, 
+          delaySeconds: delay, 
+          message: `Hệ thống sẽ gửi thông báo sau ${delay} giây. Hãy bấm nút nguồn tắt màn hình để kiểm tra!` 
+        });
+      }
+
+      await doSend();
+      return res.status(200).json({ ok: true, message: "Đã gửi thông báo thử thành công!" });
     } catch (error: any) {
       const status = error?.statusCode || error?.status || 500;
       console.error("push-test error", error);
@@ -372,48 +412,10 @@ async function startServer() {
         details: error?.body || error?.message
       });
     }
-  });
+  };
 
-  // Push Delayed Test endpoint (for testing screen-off lockscreen notifications)
-  app.post("/api/push-test-delayed", async (req, res) => {
-    try {
-      const { deviceId, subscription, delaySeconds = 10 } = req.body || {};
-      let targetSub = subscription;
-
-      if (!targetSub && deviceId) {
-        const device = await redis.get<StoredDevice>(deviceKey(deviceId));
-        if (device?.subscription) {
-          targetSub = device.subscription;
-        }
-      }
-
-      if (!targetSub?.endpoint || !targetSub?.keys?.p256dh || !targetSub?.keys?.auth) {
-        return res.status(400).json({ error: "Thiết bị chưa được đồng bộ Web Push. Hãy bấm 'Bật Web Push' trước." });
-      }
-
-      const delay = Math.max(3, Math.min(60, Number(delaySeconds) || 10));
-      console.log(`[Push Delayed Test] Sẽ gửi thông báo sau ${delay}s tới thiết bị: ${deviceId || "ẩn"}`);
-
-      setTimeout(async () => {
-        try {
-          await sendPush(targetSub, {
-            title: "🔔 SmartSchedule - Màn hình khóa OK!",
-            body: `Kiểm tra thành công! Thông báo đã xuất hiện sau ${delay}s (ngay cả khi điện thoại tắt màn hình).`,
-            url: "/",
-            tag: `test-delayed-${Date.now()}`,
-            vibrate: [400, 200, 400, 200, 800],
-          });
-          console.log(`[Push Delayed Test] Đã gửi thông báo sau ${delay}s thành công.`);
-        } catch (err: any) {
-          console.error(`[Push Delayed Test] Lỗi gửi thông báo trễ:`, err?.message || err);
-        }
-      }, delay * 1000);
-
-      return res.status(200).json({ ok: true, delaySeconds: delay, message: `Hệ thống sẽ gửi thông báo sau ${delay} giây. Hãy bấm nút nguồn tắt màn hình để kiểm tra!` });
-    } catch (error: any) {
-      return res.status(500).json({ error: error?.message || "Không thể lên lịch gửi thông báo thử" });
-    }
-  });
+  app.post("/api/push-test", handlePushTestRequest);
+  app.post("/api/push-test-delayed", handlePushTestRequest);
 
   // Push Unsubscribe endpoint
   app.post("/api/push-unsubscribe", async (req, res) => {
