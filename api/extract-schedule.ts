@@ -123,9 +123,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `;
 
     const candidateModels = [
-      "gemini-2.5-flash",
-      "gemini-3.7-flash",
-      "gemini-2.5-pro",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-lite-latest",
+      "gemini-3.8-flash",
+      "gemini-3.6-flash",
+      "gemini-3.1-pro-preview",
     ];
 
     const imagePart = {
@@ -238,19 +242,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           break; // Success, break out of attempt loop
         } catch (err: any) {
           lastError = err;
+          const errStr = `${err?.status || ""} ${err?.message || ""} ${err || ""}`;
           console.warn(`Model ${modelName} attempt ${attempt} failed:`, err?.message || err);
-          const isRetryable =
-            err?.status === "UNAVAILABLE" ||
-            err?.message?.includes("503") ||
-            err?.message?.includes("429") ||
-            err?.message?.includes("RESOURCE_EXHAUSTED") ||
-            err?.message?.includes("high demand");
 
-          if (isRetryable && attempt < 2) {
-            // Wait 1.2s before retry
-            await new Promise((res) => setTimeout(res, 1200));
+          // If quota is exhausted or model is deprecated/not found, immediately advance to next candidate model
+          const isExhaustedOrNotFound =
+            /quota|resource_exhausted|not_found|404|unsupported|deprecated/i.test(errStr);
+
+          if (isExhaustedOrNotFound) {
+            console.warn(`Model ${modelName} quota exhausted or unavailable. Instantly falling back to next candidate model.`);
+            break;
+          }
+
+          const isTransientServerBusy =
+            err?.status === "UNAVAILABLE" ||
+            errStr.includes("503") ||
+            errStr.includes("high demand") ||
+            errStr.includes("429");
+
+          if (isTransientServerBusy && attempt < 2) {
+            await new Promise((res) => setTimeout(res, 800));
           } else {
-            // Switch to next candidate model
             break;
           }
         }
