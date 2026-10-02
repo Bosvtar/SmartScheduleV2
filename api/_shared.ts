@@ -108,7 +108,7 @@ export const redis = {
   set: async (key: string, value: any, options?: { nx?: boolean; ex?: number }): Promise<any> => {
     if (upstashClient) {
       try {
-        return await upstashClient.set(key, value, options);
+        return await upstashClient.set(key, value, options as any);
       } catch (err) {
         console.warn("Upstash Redis set error, fallback to memory:", err);
       }

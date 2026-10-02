@@ -122,13 +122,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Trả về danh sách các buổi học dưới dạng mảng JSON.
     `;
 
+    // Ưu tiên các mô hình có tốc độ nhanh và độ chính xác cao trước,
+    // các mô hình còn lại được xếp sau khi các mô hình trước hết quota hoặc quá tải
     const candidateModels = [
-      "gemini-3.5-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-flash-lite",
+      // Nhóm 1: Tốc độ siêu nhanh & độ chính xác cao (Flash Lite thế hệ mới, phản hồi ~700ms - 1.2s)
       "gemini-flash-lite-latest",
+      "gemini-3.5-flash-lite",
+
+      // Nhóm 2: Khả năng suy luận và thị giác cao cấp nhất (Flash 3.8 và 3.6, độ chính xác cao)
       "gemini-3.8-flash",
       "gemini-3.6-flash",
+
+      // Nhóm 3: Mô hình Flash chuẩn mực đã được kiểm nghiệm, cân bằng tốt
+      "gemini-3.5-flash",
+      "gemini-flash-latest",
+
+      // Nhóm 4: Dự phòng khi các mô hình trên hết quota (hạn mức miễn phí)
+      "gemini-3.1-flash-lite",
       "gemini-3.1-pro-preview",
     ];
 
@@ -245,23 +255,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const errStr = `${err?.status || ""} ${err?.message || ""} ${err || ""}`;
           console.warn(`Model ${modelName} attempt ${attempt} failed:`, err?.message || err);
 
-          // If quota is exhausted or model is deprecated/not found, immediately advance to next candidate model
-          const isExhaustedOrNotFound =
-            /quota|resource_exhausted|not_found|404|unsupported|deprecated/i.test(errStr);
+          // Khi gặp lỗi hết quota (429, RESOURCE_EXHAUSTED), quá tải server (503, UNAVAILABLE),
+          // hoặc mô hình không khả dụng/deprecated (404), CHUYỂN NGAY sang mô hình tiếp theo trong danh sách ưu tiên
+          const shouldFallbackImmediately =
+            /quota|resource_exhausted|429|503|unavailable|high demand|not_found|404|unsupported|deprecated/i.test(errStr);
 
-          if (isExhaustedOrNotFound) {
-            console.warn(`Model ${modelName} quota exhausted or unavailable. Instantly falling back to next candidate model.`);
-            break;
+          if (shouldFallbackImmediately) {
+            console.warn(`Model ${modelName} gặp giới hạn/quá tải (${err?.status || err?.message}). Chuyển ngay sang mô hình dự phòng tiếp theo.`);
+            break; // Bỏ qua lượt thử lại trên cùng mô hình, lập tức sang mô hình ưu tiên tiếp theo
           }
 
-          const isTransientServerBusy =
-            err?.status === "UNAVAILABLE" ||
-            errStr.includes("503") ||
-            errStr.includes("high demand") ||
-            errStr.includes("429");
-
-          if (isTransientServerBusy && attempt < 2) {
-            await new Promise((res) => setTimeout(res, 800));
+          // Chỉ thử lại với lỗi mạng cục bộ nhất thời
+          if (attempt < 2) {
+            await new Promise((res) => setTimeout(res, 300));
           } else {
             break;
           }
