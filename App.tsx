@@ -35,6 +35,7 @@ import EditSessionModal from './components/EditSessionModal';
 import NotificationSettingsModal from './components/NotificationSettingsModal';
 import CameraCaptureModal from './components/CameraCaptureModal';
 import ScheduleCheckModal from './components/ScheduleCheckModal';
+import DatePickerInput from './components/DatePickerInput';
 import { 
   Loader2, 
   Upload, 
@@ -843,10 +844,12 @@ const AddPage: React.FC<{
   };
 
   const handleEditItem = (index: number, field: keyof ScheduleItem, value: string) => {
-    if (!extractedData) return;
-    const newData = [...extractedData];
-    newData[index] = { ...newData[index], [field]: value };
-    setExtractedData(newData);
+    setExtractedData(prev => {
+      if (!prev) return prev;
+      const newData = [...prev];
+      newData[index] = { ...newData[index], [field]: value };
+      return newData;
+    });
   };
 
   const handleDeleteItem = (index: number) => {
@@ -942,17 +945,17 @@ const AddPage: React.FC<{
                  </div>
                  <div>
                     <label className="text-[11px] font-bold text-gray-400 block mb-1">Ngày (DD/MM/YYYY)</label>
-                    <input 
+                    <DatePickerInput
                         value={item.date || ''}
-                        placeholder="VD: 11/08/2026"
-                        onChange={(e) => {
-                          handleEditItem(index, 'date', e.target.value);
-                          const calcDay = getDayOfWeekFromDate(e.target.value);
+                        placeholder="Chọn ngày..."
+                        compact={true}
+                        onChange={(newDate) => {
+                          handleEditItem(index, 'date', newDate);
+                          const calcDay = getDayOfWeekFromDate(newDate);
                           if (calcDay) {
                             handleEditItem(index, 'dayOfWeek', calcDay);
                           }
                         }}
-                        className="w-full text-xs bg-gray-50 rounded-lg p-2 border border-gray-200 font-medium text-gray-800"
                     />
                  </div>
                  

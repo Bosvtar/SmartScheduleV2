@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ScheduleItem, DAYS_ORDER, COMMON_PERIOD_PRESETS, getPeriodLabelFromTime, getDayOfWeekFromDate } from '../types';
 import { X, Save, Trash2, Clock, Calendar, BookOpen, Users, MapPin, Plus, Sparkles } from 'lucide-react';
+import DatePickerInput from './DatePickerInput';
 
 interface EditSessionModalProps {
   isOpen: boolean;
@@ -228,12 +229,10 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1">
                 Ngày Cụ Thể (DD/MM/YYYY)
               </label>
-              <input
-                type="text"
+              <DatePickerInput
                 value={date}
-                onChange={(e) => handleDateChange(e.target.value)}
-                placeholder="VD: 11/08/2026"
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-indigo-500 bg-white text-sm font-medium"
+                onChange={(val) => handleDateChange(val)}
+                placeholder="Chọn ngày..."
               />
               <span className="text-[10px] text-gray-400 mt-1 block">
                 Để trống nếu là lịch cố định hàng tuần
